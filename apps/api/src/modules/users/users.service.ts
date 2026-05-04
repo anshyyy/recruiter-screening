@@ -24,6 +24,7 @@ export class UsersService {
         skills: Array.isArray(user.skills) ? [...user.skills] : ([] as string[]),
         resumeObjectKey: user.resumeObjectKey,
         resumeFileName: user.resumeFileName,
+        phoneNumber: user.phoneNumber,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       };
@@ -89,6 +90,7 @@ export class UsersService {
         skills: [],
         resumeObjectKey: null,
         resumeFileName: null,
+        phoneNumber: null,
       });
       return await this.usersRepo.save(entity);
     } catch (error: unknown) {
@@ -126,6 +128,7 @@ export class UsersService {
       skills?: string[];
       resumeObjectKey?: string | null;
       resumeFileName?: string | null;
+      phoneNumber?: string | null;
     },
   ): Promise<User> {
     try {
@@ -142,6 +145,9 @@ export class UsersService {
       if (updates.resumeFileName !== undefined) {
         user.resumeFileName = updates.resumeFileName;
       }
+      if (updates.phoneNumber !== undefined) {
+        user.phoneNumber = normalizeE164OrNull(updates.phoneNumber);
+      }
       if (user.resumeObjectKey && !user.resumeFileName) {
         throw new BadRequestException('resumeFileName is required when resumeObjectKey is set');
       }
@@ -153,4 +159,21 @@ export class UsersService {
       handleServiceError(this.logger, 'UsersService.updateCandidateProfile', error);
     }
   }
+}
+
+/** Validates E.164 ("+" then 1–15 digits, first digit non-zero). Returns null for empty input. */
+function normalizeE164OrNull(input: string | null | undefined): string | null {
+  if (input === null || input === undefined) {
+    return null;
+  }
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (!/^\+[1-9]\d{1,14}$/.test(trimmed)) {
+    throw new BadRequestException(
+      'Phone number must be in E.164 format (e.g. +14155550100).',
+    );
+  }
+  return trimmed;
 }

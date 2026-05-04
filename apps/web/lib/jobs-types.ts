@@ -13,6 +13,9 @@ export type JobDto = {
   updatedAt: string;
 };
 
+/** Current hiring stage for an application (mirrors API `pipelinePhase`). */
+export type ApplicationPipelinePhase = 'screening' | 'interview' | 'decision' | 'offer' | 'rejected';
+
 /** One application with embedded job summary from `GET /job-applications/me` or `POST /jobs/:id/apply`. */
 export type AppliedJobDto = {
   applicationId: string;
@@ -27,6 +30,8 @@ export type AppliedJobDto = {
   /** Present on API versions that snapshot profile data per application. */
   submittedSkills?: string[];
   submittedResumeFileName?: string | null;
+  /** Current stage; older clients may omit — treat as `screening`. */
+  pipelinePhase?: ApplicationPipelinePhase;
 };
 
 const EMPLOYMENT_LABELS: Record<EmploymentType, string> = {

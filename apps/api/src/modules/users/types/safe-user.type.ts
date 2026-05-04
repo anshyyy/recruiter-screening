@@ -10,6 +10,7 @@ export type SafeUser = Pick<
   | 'skills'
   | 'resumeObjectKey'
   | 'resumeFileName'
+  | 'phoneNumber'
   | 'createdAt'
   | 'updatedAt'
 >;

@@ -1,70 +1,102 @@
-import Image from "next/image";
-import { ApiStatusBanner } from "@/components/ApiStatusBanner";
-import { fetchApiHealth } from "@/lib/api-health";
+import Link from "next/link";
+import { APP_DISPLAY_NAME } from "@/lib/app-brand";
 
-export default async function Home() {
-  const apiHealth = await fetchApiHealth();
+const primaryCtaClass =
+  "inline-flex h-11 items-center justify-center rounded-lg bg-white px-6 text-sm font-semibold text-zinc-950 shadow-lg shadow-indigo-950/30 transition hover:bg-zinc-100";
 
+const secondaryCtaClass =
+  "inline-flex h-11 items-center justify-center rounded-lg border border-white/20 bg-white/5 px-6 text-sm font-semibold text-white backdrop-blur transition hover:bg-white/10";
+
+const ghostCtaClass =
+  "inline-flex h-11 items-center justify-center rounded-lg px-5 text-sm font-medium text-zinc-300 transition hover:bg-white/5 hover:text-white";
+
+export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between gap-8 py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <ApiStatusBanner result={apiHealth} />
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="relative flex min-h-full flex-1 flex-col overflow-hidden bg-zinc-950 font-sans text-zinc-100">
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_120%_80%_at_50%_-20%,rgba(99,102,241,0.35),transparent)]"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute -left-32 top-1/4 h-[28rem] w-[28rem] rounded-full bg-indigo-600/25 blur-3xl"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute -right-24 bottom-0 h-[22rem] w-[22rem] rounded-full bg-violet-600/20 blur-3xl"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.12] [background-image:linear-gradient(to_right,rgb(255_255_255/0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgb(255_255_255/0.08)_1px,transparent_1px)] [background-size:4rem_4rem]"
+        aria-hidden
+      />
+
+      <main className="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col px-5 pb-20 pt-14 sm:px-8 sm:pt-20 lg:px-12 lg:pt-28">
+        <p className="mb-4 inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium uppercase tracking-wider text-indigo-200">
+          Candidate experience
+        </p>
+
+        <h1 className="max-w-3xl text-4xl font-semibold leading-[1.1] tracking-tight sm:text-5xl sm:leading-[1.08] lg:text-6xl">
+          Land the right role with{" "}
+          <span className="bg-gradient-to-r from-white via-indigo-100 to-violet-200 bg-clip-text text-transparent">
+            {APP_DISPLAY_NAME}
+          </span>
+        </h1>
+
+        <p className="mt-6 max-w-xl text-lg leading-relaxed text-zinc-400 sm:text-xl">
+          One profile, résumé on file, and skills that travel with every application—so recruiters see the real you,
+          not another empty form.
+        </p>
+
+        <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
+          <Link href="/login" className={primaryCtaClass}>
+            Sign in
+          </Link>
+          <Link href="/register" className={secondaryCtaClass}>
+            Create account
+          </Link>
+          <Link href="/jobs" className={ghostCtaClass}>
+            Browse open roles →
+          </Link>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-              style={{ width: "auto", height: "auto" }}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+
+        <ul className="mt-20 grid gap-4 sm:grid-cols-3 sm:gap-6">
+          <li className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-sm transition hover:border-indigo-500/30 hover:bg-white/[0.06]">
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/25 text-sm font-bold text-indigo-200"
+              aria-hidden
+            >
+              1
+            </span>
+            <h2 className="mt-3 text-base font-semibold text-white">Fast apply</h2>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+              Submit once per job with your profile snapshot—no re-uploading the same PDF every time.
+            </p>
+          </li>
+          <li className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-sm transition hover:border-indigo-500/30 hover:bg-white/[0.06]">
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/25 text-sm font-bold text-indigo-200"
+              aria-hidden
+            >
+              2
+            </span>
+            <h2 className="mt-3 text-base font-semibold text-white">Résumé + skills</h2>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+              Keep skills and résumé in sync on your profile; applications stay consistent with what you intended.
+            </p>
+          </li>
+          <li className="rounded-2xl border border-white/10 bg-white/[0.03] p-6 backdrop-blur-sm transition hover:border-indigo-500/30 hover:bg-white/[0.06] sm:col-span-1">
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/25 text-sm font-bold text-indigo-200"
+              aria-hidden
+            >
+              3
+            </span>
+            <h2 className="mt-3 text-base font-semibold text-white">Track applications</h2>
+            <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+              See where you have applied and stay oriented as new roles open up.
+            </p>
+          </li>
+        </ul>
       </main>
     </div>
   );

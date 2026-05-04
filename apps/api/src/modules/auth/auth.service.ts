@@ -53,6 +53,7 @@ export class AuthService {
         fullName: dto.fullName ?? null,
         role,
       });
+      this.logger.log(`register: new account userId=${user.id} role=${role}`);
       return await this.login(this.usersService.toSafeUser(user));
     } catch (error: unknown) {
       handleServiceError(this.logger, 'AuthService.register', error);
@@ -72,6 +73,7 @@ export class AuthService {
         tv: fresh.tokenVersion,
       };
       const accessToken = await this.jwtService.signAsync(payload);
+      this.logger.log(`login: access token issued userId=${fresh.id}`);
       return { accessToken, user: this.usersService.toSafeUser(fresh) };
     } catch (error: unknown) {
       handleServiceError(this.logger, 'AuthService.login', error);
@@ -84,10 +86,12 @@ export class AuthService {
       skills?: string[];
       resumeObjectKey?: string | null;
       resumeFileName?: string | null;
+      phoneNumber?: string | null;
     },
   ): Promise<SafeUser> {
     try {
       const updated = await this.usersService.updateCandidateProfile(userId, updates);
+      this.logger.log(`updateMyProfile: userId=${userId}`);
       return this.usersService.toSafeUser(updated);
     } catch (error: unknown) {
       handleServiceError(this.logger, 'AuthService.updateMyProfile', error);
@@ -98,6 +102,7 @@ export class AuthService {
   async logout(userId: string): Promise<void> {
     try {
       await this.usersService.incrementTokenVersion(userId);
+      this.logger.log(`logout: token version bumped userId=${userId}`);
     } catch (error: unknown) {
       handleServiceError(this.logger, 'AuthService.logout', error);
     }

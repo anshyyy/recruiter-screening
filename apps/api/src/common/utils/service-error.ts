@@ -11,6 +11,7 @@ import { QueryFailedError } from 'typeorm';
  * Re-throws {@link HttpException} unchanged so controllers keep control flow.
  */
 export function handleServiceError(logger: Logger, context: string, error: unknown): never {
+  logger.error(`[${context}] ${error}`);
   if (error instanceof HttpException) {
     throw error;
   }

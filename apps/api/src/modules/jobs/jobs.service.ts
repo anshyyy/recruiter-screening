@@ -15,7 +15,9 @@ export class JobsService {
 
   async findAll(): Promise<Job[]> {
     try {
-      return await this.jobsRepo.find({ order: { createdAt: 'DESC' } });
+      const jobs = await this.jobsRepo.find({ order: { createdAt: 'DESC' } });
+      this.logger.debug(`findAll: returned ${jobs.length} job(s)`);
+      return jobs;
     } catch (error: unknown) {
       handleServiceError(this.logger, 'JobsService.findAll', error);
     }
@@ -23,7 +25,13 @@ export class JobsService {
 
   async findById(id: string): Promise<Job | null> {
     try {
-      return await this.jobsRepo.findOne({ where: { id } });
+      const job = await this.jobsRepo.findOne({ where: { id } });
+      if (job) {
+        this.logger.debug(`findById: hit id=${id}`);
+      } else {
+        this.logger.debug(`findById: miss id=${id}`);
+      }
+      return job;
     } catch (error: unknown) {
       handleServiceError(this.logger, 'JobsService.findById', error);
     }

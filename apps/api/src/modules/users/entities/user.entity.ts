@@ -25,13 +25,17 @@ export class User {
   @Column({ type: 'jsonb', name: 'skills', default: () => "'[]'::jsonb" })
   skills!: string[];
 
-  /** S3 object key from `POST /uploads/presign-put` (user-owned prefix). */
+  /** S3 object key from `POST /uploads/file`; client PATCHes profile after upload. */
   @Column({ type: 'varchar', length: 512, nullable: true, name: 'resume_object_key' })
   resumeObjectKey!: string | null;
 
   /** Original résumé file name for display and downloads. */
   @Column({ type: 'varchar', length: 260, nullable: true, name: 'resume_file_name' })
   resumeFileName!: string | null;
+
+  /** E.164 phone number used by the AI screening agent (Bolna) to call the candidate. */
+  @Column({ type: 'varchar', length: 24, nullable: true, name: 'phone_number' })
+  phoneNumber!: string | null;
 
   /**
    * Monotonic session stamp: embedded in JWTs as `tv` and checked on each request.

@@ -1,21 +1,37 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { memoryStorage } from 'multer';
 import type { SafeUser } from '../users/types/safe-user.type';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { PresignGetDto } from './dto/presign-get.dto';
-import { PresignPutDto } from './dto/presign-put.dto';
-import type { PresignGetResult, PresignPutResult } from './upload.service';
+import { ReadUrlDto } from './dto';
+import { ALLOWED_UPLOAD_CONTENT_TYPES, isAllowedUploadContentType, MAX_UPLOAD_BYTES } from './upload.constants';
+import type { FileUploadResult, UploadReadUrlResult } from './upload.service';
 import { UploadService } from './upload.service';
 
 /**
- * All routes require a valid JWT. Clients upload/download directly to S3 using presigned URLs.
+ * Generic authenticated file upload to S3 (public-read objects). Profile PATCH is separate:
+ * client sends `resumeObjectKey` / `resumeFileName` after upload when attaching a résumé.
  */
 @ApiTags('uploads')
 @ApiBearerAuth('access-token')
@@ -24,27 +40,61 @@ import { UploadService } from './upload.service';
 export class UploadController {
   constructor(private readonly uploadService: UploadService) {}
 
-  @Post('presign-put')
+  @Post('file')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Presigned PUT — upload bytes directly to S3' })
-  @ApiOkResponse({ description: 'Time-limited PUT URL and object key' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: `Allowed types: ${ALLOWED_UPLOAD_CONTENT_TYPES.join(', ')}`,
+        },
+      },
+    },
+  })
+  @ApiOperation({ summary: 'Upload a file — returns public fileUrl and objectKey for client-side follow-up (e.g. PATCH profile)' })
+  @ApiOkResponse({ description: 'fileUrl and objectKey' })
   @ApiUnauthorizedResponse()
-  async presignPut(
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_UPLOAD_BYTES },
+    }),
+  )
+  async uploadFile(
     @Req() req: Request & { user: SafeUser },
-    @Body() dto: PresignPutDto,
-  ): Promise<PresignPutResult> {
-    return this.uploadService.createPresignedPut(req.user.id, dto);
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ): Promise<FileUploadResult> {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('file is required');
+    }
+    if (!isAllowedUploadContentType(file.mimetype)) {
+      throw new BadRequestException(
+        `Unsupported file type. Allowed: ${ALLOWED_UPLOAD_CONTENT_TYPES.join(', ')}`,
+      );
+    }
+    return this.uploadService.uploadPublicFile(req.user.id, file.buffer, file.originalname, file.mimetype);
   }
 
-  @Post('presign-get')
+  @Post('read-url')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Presigned GET — download an object you own' })
-  @ApiOkResponse({ description: 'Time-limited GET URL' })
+  @ApiOperation({ summary: 'Public HTTPS URL for a key that matches your profile resumeObjectKey' })
+  @ApiOkResponse({ description: 'downloadUrl and objectKey' })
   @ApiUnauthorizedResponse()
-  async presignGet(
-    @Req() req: Request & { user: SafeUser },
-    @Body() dto: PresignGetDto,
-  ): Promise<PresignGetResult> {
-    return this.uploadService.createPresignedGet(req.user.id, dto);
+  readUrl(@Req() req: Request & { user: SafeUser }, @Body() dto: ReadUrlDto): UploadReadUrlResult {
+    return this.uploadService.getPublicDownloadUrl(req.user, dto);
+  }
+
+  @Post('delete')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete S3 object whose key matches your profile resumeObjectKey' })
+  @ApiOkResponse({ description: 'Object removed (envelope data may be null)' })
+  @ApiUnauthorizedResponse()
+  async deleteObject(@Req() req: Request & { user: SafeUser }, @Body() dto: ReadUrlDto): Promise<void> {
+    await this.uploadService.deleteOwnedObject(req.user, dto);
   }
 }

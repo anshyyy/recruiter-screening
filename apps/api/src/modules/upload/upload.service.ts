@@ -1,73 +1,103 @@
 import {
+  BadRequestException,
   ForbiddenException,
-  HttpException,
   Injectable,
   InternalServerErrorException,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { randomUUID } from 'node:crypto';
-import { extname } from 'node:path';
-import { handleServiceError } from '../../common/utils/service-error';
-import { PRESIGNED_URL_EXPIRES_SECONDS } from './upload.constants';
-import type { PresignGetDto } from './dto/presign-get.dto';
-import type { PresignPutDto } from './dto/presign-put.dto';
+import { DeleteObjectCommand, ObjectCannedACL, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { createHash, randomUUID } from 'node:crypto';
+import { basename, extname } from 'node:path';
+import type { ReadUrlDto } from './dto';
+import type { SafeUser } from '../users/types/safe-user.type';
+import { ALLOWED_UPLOAD_CONTENT_TYPES, isAllowedUploadContentType } from './upload.constants';
 
-export type PresignPutResult = {
-  /** HTTP PUT URL (time-limited). */
-  uploadUrl: string;
-  /** Persist this key to request a download URL later. */
+/** Response after `POST /uploads/file` — plain public HTTPS URL (no query string) and S3 key. */
+export type FileUploadResult = {
+  fileUrl: string;
   objectKey: string;
-  expiresInSeconds: number;
-  /** Headers the client must send on PUT (must match the signature). */
-  requiredHeaders: Record<string, string>;
 };
 
-export type PresignGetResult = {
+/** Response for `POST /uploads/read-url`. */
+export type UploadReadUrlResult = {
   downloadUrl: string;
   objectKey: string;
-  expiresInSeconds: number;
 };
 
 @Injectable()
-export class UploadService {
+export class UploadService implements OnModuleInit {
   private readonly logger = new Logger(UploadService.name);
 
-  private readonly client: S3Client;
-  private readonly bucket: string;
+  private s3Client!: S3Client;
+  private bucket = '';
+  private region = '';
+  private endpoint: string | undefined;
 
-  constructor(private readonly config: ConfigService) {
-    const region = config.get<string>('AWS_REGION') ?? config.get<string>('S3_REGION');
-    const accessKeyId = config.get<string>('AWS_ACCESS_KEY_ID');
-    const secretAccessKey = config.get<string>('AWS_SECRET_ACCESS_KEY');
-    const endpoint = config.get<string>('S3_ENDPOINT')?.trim();
-    const forcePathStyle = config.get<string>('S3_FORCE_PATH_STYLE') === 'true';
+  constructor(private readonly config: ConfigService) {}
 
-    const bucket = config.get<string>('S3_BUCKET')?.trim();
-    if (!bucket) {
-      this.logger.warn('S3_BUCKET is not set; upload APIs will return errors until configured.');
+  onModuleInit(): void {
+    this.bucket =
+      this.config.get<string>('S3_BUCKET')?.trim() ?? this.config.get<string>('AWS_S3_BUCKET')?.trim() ?? '';
+    this.region =
+      this.config.get<string>('AWS_REGION')?.trim() ??
+      this.config.get<string>('S3_REGION')?.trim() ??
+      'us-east-1';
+    this.endpoint = this.config.get<string>('S3_ENDPOINT')?.trim() || undefined;
+
+    const accessKeyId =
+      this.config.get<string>('AWS_ACCESS_KEY_ID')?.trim() ??
+      this.config.get<string>('AWS_ACCESS_KEY')?.trim();
+    const secretAccessKey =
+      this.config.get<string>('AWS_SECRET_ACCESS_KEY')?.trim() ??
+      this.config.get<string>('AWS_SECRET_KEY')?.trim();
+
+    if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
+      throw new BadRequestException(
+        'AWS S3 configuration error: provide both access key id and secret access key, or omit both to use the default credential chain (e.g. IAM role).',
+      );
     }
-    this.bucket = bucket ?? '';
 
-    this.client = new S3Client({
-      region: region ?? 'us-east-1',
-      ...(accessKeyId && secretAccessKey
-        ? { credentials: { accessKeyId, secretAccessKey } }
-        : {}),
-      ...(endpoint ? { endpoint, forcePathStyle: forcePathStyle || true } : {}),
+    if (!this.bucket) {
+      this.logger.warn('S3_BUCKET or AWS_S3_BUCKET is not set; upload APIs will fail until configured.');
+    }
+
+    this.s3Client = new S3Client({
+      region: this.region,
+      endpoint: this.endpoint,
+      forcePathStyle: Boolean(this.endpoint),
+      credentials:
+        accessKeyId && secretAccessKey
+          ? { accessKeyId, secretAccessKey }
+          : undefined,
     });
+
+    this.logger.log(`S3 initialized: bucket=${this.bucket || '(unset)'}, region=${this.region}`);
   }
 
   private assertBucketConfigured(): void {
     if (!this.bucket) {
-      throw new InternalServerErrorException('File uploads are not configured (missing S3_BUCKET).');
+      throw new InternalServerErrorException(
+        'File uploads are not configured (set S3_BUCKET or AWS_S3_BUCKET).',
+      );
     }
   }
 
-  private userObjectPrefix(userId: string): string {
-    return `uploads/${userId}/`;
+  /**
+   * Plain HTTPS URL for the object. Anonymous GET works when the object (or bucket) is publicly readable.
+   */
+  getPublicObjectUrl(objectKey: string): string {
+    const encodedKey = objectKey
+      .split('/')
+      .filter((segment) => segment.length > 0)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+    const ep = this.endpoint?.replace(/\/+$/, '');
+    if (ep) {
+      return `${ep}/${this.bucket}/${encodedKey}`;
+    }
+    return `https://${this.bucket}.s3.${this.region}.amazonaws.com/${encodedKey}`;
   }
 
   private sanitizeExtension(fileName: string): string {
@@ -76,67 +106,131 @@ export class UploadService {
     return safe.length > 0 ? safe : '';
   }
 
-  private buildObjectKey(userId: string, fileName: string): string {
-    const ext = this.sanitizeExtension(fileName);
-    return `${this.userObjectPrefix(userId)}${randomUUID()}${ext}`;
+  private sanitizeFileBaseName(fileName: string): string {
+    const base = basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+    return base.length > 0 ? base.slice(0, 200) : 'file';
   }
 
-  private assertKeyOwnedByUser(userId: string, objectKey: string): void {
-    const prefix = this.userObjectPrefix(userId);
-    if (objectKey.includes('..') || objectKey.includes('\\') || !objectKey.startsWith(prefix)) {
-      throw new ForbiddenException('You may only access objects under your own prefix.');
+  /** Root object key: `{8-char-hex}-{safeFileName}`. */
+  private generatePublicRootObjectKey(userId: string, fileName: string): string {
+    const hash = createHash('sha256')
+      .update(`${userId}:${fileName}:${Date.now()}:${randomUUID()}`)
+      .digest('hex')
+      .substring(0, 8);
+    const safeName = this.sanitizeFileBaseName(fileName);
+    const ext = this.sanitizeExtension(fileName);
+    const hasExtInName = ext.length > 0 && safeName.toLowerCase().endsWith(ext.toLowerCase());
+    const suffix = hasExtInName ? '' : ext;
+    return `${hash}-${safeName}${suffix}`;
+  }
+
+  /** Only the S3 key currently stored on the user profile (`resumeObjectKey`) may be read or deleted here. */
+  private assertObjectKeyMatchesProfile(user: SafeUser, objectKey: string): void {
+    if (!objectKey || objectKey.includes('..') || objectKey.includes('\\')) {
+      throw new BadRequestException('Invalid object key');
+    }
+    if (user.resumeObjectKey !== objectKey) {
+      throw new ForbiddenException('That object key does not match your profile.');
     }
   }
 
-  async createPresignedPut(userId: string, dto: PresignPutDto): Promise<PresignPutResult> {
+  private assertMimeAllowed(contentType: string): void {
+    if (!isAllowedUploadContentType(contentType)) {
+      throw new BadRequestException(
+        `Content type not allowed. Use one of: ${ALLOWED_UPLOAD_CONTENT_TYPES.join(', ')}`,
+      );
+    }
+  }
+
+  private mapAwsConfigError(err: unknown): void {
+    if (!(err instanceof Error)) {
+      return;
+    }
+    if (err.message.includes('Region is missing')) {
+      throw new BadRequestException('AWS S3 configuration error: Region is missing');
+    }
+    if (err.message.includes('InvalidAccessKeyId')) {
+      throw new BadRequestException('AWS S3 configuration error: Invalid access key');
+    }
+    if (err.message.includes('SignatureDoesNotMatch')) {
+      throw new BadRequestException('AWS S3 configuration error: Invalid secret key');
+    }
+  }
+
+  /**
+   * Stores bytes in S3 with ACL **public-read** and returns the stable public URL + key.
+   * Caller (e.g. frontend) then PATCHes profile with `resumeObjectKey` / `resumeFileName` as needed.
+   */
+  async uploadPublicFile(
+    userId: string,
+    buffer: Buffer,
+    originalName: string,
+    contentType: string,
+  ): Promise<FileUploadResult> {
+    this.assertBucketConfigured();
+    this.assertMimeAllowed(contentType);
+    const objectKey = this.generatePublicRootObjectKey(userId, originalName);
     try {
-      this.assertBucketConfigured();
-      const objectKey = this.buildObjectKey(userId, dto.fileName);
       const command = new PutObjectCommand({
         Bucket: this.bucket,
         Key: objectKey,
-        ContentType: dto.contentType,
+        Body: buffer,
+        ContentType: contentType,
+        ACL: ObjectCannedACL.public_read,
       });
-      const uploadUrl = await getSignedUrl(this.client, command, {
-        expiresIn: PRESIGNED_URL_EXPIRES_SECONDS,
-      });
-      return {
-        uploadUrl,
-        objectKey,
-        expiresInSeconds: PRESIGNED_URL_EXPIRES_SECONDS,
-        requiredHeaders: {
-          'Content-Type': dto.contentType,
-        },
-      };
-    } catch (error: unknown) {
-      if (error instanceof HttpException) {
-        throw error;
+      await this.s3Client.send(command);
+      const fileUrl = this.getPublicObjectUrl(objectKey);
+      this.logger.log(`uploadPublicFile: userId=${userId} objectKey=${objectKey} contentType=${contentType}`);
+      return { objectKey, fileUrl };
+    } catch (err) {
+      this.mapAwsConfigError(err);
+      if (this.isAclRejectedByBucket(err)) {
+        throw new BadRequestException(
+          'S3 rejected public-read ACL (often Object Ownership = Bucket owner enforced, or Block Public ACLs). In the S3 console: bucket → Permissions → Object Ownership → edit to allow ACLs, and adjust Block public access so new objects can be public-read; or use a bucket policy for public GetObject instead.',
+        );
       }
-      handleServiceError(this.logger, 'UploadService.createPresignedPut', error);
+      this.logger.error('uploadPublicFile failed', err instanceof Error ? err.stack : err);
+      throw new InternalServerErrorException('File upload failed: Unable to upload file to S3 storage');
     }
   }
 
-  async createPresignedGet(userId: string, dto: PresignGetDto): Promise<PresignGetResult> {
+  private isAclRejectedByBucket(err: unknown): boolean {
+    const name = err && typeof err === 'object' && 'name' in err ? String((err as { name: string }).name) : '';
+    const msg = err instanceof Error ? err.message : '';
+    return (
+      name === 'AccessControlListNotSupported' ||
+      msg.includes('AccessControlListNotSupported') ||
+      msg.includes('does not allow ACLs') ||
+      msg.includes('InvalidBucketAclWithObjectOwnership')
+    );
+  }
+
+  /** Public URL for a key that matches `resumeObjectKey` on the JWT user. */
+  getPublicDownloadUrl(user: SafeUser, dto: ReadUrlDto): UploadReadUrlResult {
+    this.assertBucketConfigured();
+    this.assertObjectKeyMatchesProfile(user, dto.objectKey);
+    return {
+      downloadUrl: this.getPublicObjectUrl(dto.objectKey),
+      objectKey: dto.objectKey,
+    };
+  }
+
+  /** Deletes an object if its key matches `resumeObjectKey` on the JWT user. */
+  async deleteOwnedObject(user: SafeUser, dto: ReadUrlDto): Promise<void> {
+    this.assertBucketConfigured();
+    this.assertObjectKeyMatchesProfile(user, dto.objectKey);
     try {
-      this.assertBucketConfigured();
-      this.assertKeyOwnedByUser(userId, dto.objectKey);
-      const command = new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: dto.objectKey,
-      });
-      const downloadUrl = await getSignedUrl(this.client, command, {
-        expiresIn: PRESIGNED_URL_EXPIRES_SECONDS,
-      });
-      return {
-        downloadUrl,
-        objectKey: dto.objectKey,
-        expiresInSeconds: PRESIGNED_URL_EXPIRES_SECONDS,
-      };
-    } catch (error: unknown) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      handleServiceError(this.logger, 'UploadService.createPresignedGet', error);
+      await this.s3Client.send(
+        new DeleteObjectCommand({
+          Bucket: this.bucket,
+          Key: dto.objectKey,
+        }),
+      );
+      this.logger.log(`deleteOwnedObject: userId=${user.id} objectKey=${dto.objectKey}`);
+    } catch (err) {
+      this.mapAwsConfigError(err);
+      this.logger.error('deleteOwnedObject failed', err instanceof Error ? err.stack : err);
+      throw new InternalServerErrorException('File deletion failed: Unable to remove file from storage');
     }
   }
 }

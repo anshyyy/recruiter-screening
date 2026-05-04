@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import type { AuthUser } from '@/lib/auth-api';
 import { patchAuthProfile } from '@/lib/auth-api';
-import { presignUploadGet, presignUploadPut } from '@/lib/upload-api';
+import { requestUploadDelete, requestUploadFile, requestUploadReadUrl } from '@/lib/upload-api';
 
 export type ProfileResumeCardProps = {
   accessToken: string;
@@ -13,7 +13,7 @@ export type ProfileResumeCardProps = {
 };
 
 /**
- * PDF upload via presigned PUT, then profile PATCH with object key + display name.
+ * PDF upload via `POST /uploads/file`, then PATCH profile with `resumeObjectKey` + `resumeFileName`.
  */
 export function ProfileResumeCard({ accessToken, user, disabled, onProfileUpdated }: ProfileResumeCardProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,22 +33,16 @@ export function ProfileResumeCard({ accessToken, user, disabled, onProfileUpdate
     setError(null);
     setBusy(true);
     try {
-      const presign = await presignUploadPut(accessToken, {
-        fileName: file.name,
-        contentType: 'application/pdf',
-        byteSize: file.size,
-      });
-      const putHeaders = new Headers(presign.requiredHeaders);
-      const putRes = await fetch(presign.uploadUrl, {
-        method: 'PUT',
-        headers: putHeaders,
-        body: file,
-      });
-      if (!putRes.ok) {
-        throw new Error(`Upload failed (${putRes.status})`);
+      const { objectKey } = await requestUploadFile(accessToken, file);
+      if (user.resumeObjectKey && user.resumeObjectKey !== objectKey) {
+        try {
+          await requestUploadDelete(accessToken, user.resumeObjectKey);
+        } catch {
+          /* best-effort: old object may already be gone */
+        }
       }
       const updated = await patchAuthProfile(accessToken, {
-        resumeObjectKey: presign.objectKey,
+        resumeObjectKey: objectKey,
         resumeFileName: file.name,
       });
       onProfileUpdated(updated);
@@ -66,7 +60,7 @@ export function ProfileResumeCard({ accessToken, user, disabled, onProfileUpdate
     setError(null);
     setBusy(true);
     try {
-      const { downloadUrl } = await presignUploadGet(accessToken, user.resumeObjectKey);
+      const { downloadUrl } = await requestUploadReadUrl(accessToken, user.resumeObjectKey);
       window.open(downloadUrl, '_blank', 'noopener,noreferrer');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not open download link');
@@ -79,6 +73,13 @@ export function ProfileResumeCard({ accessToken, user, disabled, onProfileUpdate
     setBusy(true);
     setError(null);
     try {
+      if (user.resumeObjectKey) {
+        try {
+          await requestUploadDelete(accessToken, user.resumeObjectKey);
+        } catch {
+          /* still clear profile if S3 delete fails (e.g. object already gone) */
+        }
+      }
       const updated = await patchAuthProfile(accessToken, {
         resumeObjectKey: null,
         resumeFileName: null,

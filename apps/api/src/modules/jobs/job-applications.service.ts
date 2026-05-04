@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { handleServiceError } from '../../common/utils/service-error';
 import { UsersService } from '../users/users.service';
 import { JobApplication } from './entities/job-application.entity';
+import { ApplicationPipelinePhase } from './enums/application-pipeline-phase.enum';
 import { EmploymentType } from './enums/employment-type.enum';
 import { JobsService } from './jobs.service';
 
@@ -27,6 +28,8 @@ export type AppliedJobView = {
   submittedSkills: string[];
   /** Résumé file name attached to this application. */
   submittedResumeFileName: string | null;
+  /** Current stage in the hiring pipeline (candidate-facing). */
+  pipelinePhase: ApplicationPipelinePhase;
 };
 
 @Injectable()
@@ -69,6 +72,11 @@ export class JobApplicationsService {
           'Upload your résumé on your profile before applying. Applications are sent with your profile résumé.',
         );
       }
+      if (!applicant.phoneNumber) {
+        throw new BadRequestException(
+          'Add a phone number on your profile before applying. The screening agent will call this number.',
+        );
+      }
 
       const row = this.applicationsRepo.create({
         userId,
@@ -76,14 +84,19 @@ export class JobApplicationsService {
         skillsSnapshot: [...skills],
         resumeObjectKeySnapshot: applicant.resumeObjectKey,
         resumeFileNameSnapshot: applicant.resumeFileName,
+        phoneNumberSnapshot: applicant.phoneNumber,
       });
       const saved = await this.applicationsRepo.save(row);
+      this.logger.log(
+        `apply: created applicationId=${saved.id} userId=${userId} jobId=${jobId}`,
+      );
       return this.toAppliedView(
         saved.id,
         saved.appliedAt,
         job,
         saved.skillsSnapshot ?? [],
         saved.resumeFileNameSnapshot,
+        saved.pipelinePhase ?? ApplicationPipelinePhase.SCREENING,
       );
     } catch (error: unknown) {
       handleServiceError(this.logger, 'JobApplicationsService.apply', error);
@@ -97,6 +110,7 @@ export class JobApplicationsService {
         relations: { job: true },
         order: { appliedAt: 'DESC' },
       });
+      this.logger.debug(`findAppliedForUser: userId=${userId} count=${rows.length}`);
 
       return rows.map((row) => {
         const { job } = row;
@@ -106,6 +120,7 @@ export class JobApplicationsService {
           job,
           row.skillsSnapshot ?? [],
           row.resumeFileNameSnapshot,
+          row.pipelinePhase ?? ApplicationPipelinePhase.SCREENING,
         );
       });
     } catch (error: unknown) {
@@ -125,6 +140,7 @@ export class JobApplicationsService {
     },
     submittedSkills: string[],
     submittedResumeFileName: string | null,
+    pipelinePhase: ApplicationPipelinePhase,
   ): AppliedJobView {
     return {
       applicationId,
@@ -138,6 +154,7 @@ export class JobApplicationsService {
       },
       submittedSkills,
       submittedResumeFileName,
+      pipelinePhase,
     };
   }
 }

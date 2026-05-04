@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
@@ -6,6 +6,7 @@ import { HttpApiExceptionFilter } from './common/filters/http-api-exception.filt
 import { TransformResponseInterceptor } from './common/interceptors/transform-response.interceptor';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api');
@@ -37,8 +38,8 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 8080);
   await app.listen(port);
-  console.log(`API listening on http://localhost:${port}/api`);
-  console.log(`Swagger UI: http://localhost:${port}/api/docs`);
+  logger.log(`API listening on http://localhost:${port}/api`);
+  logger.log(`Swagger UI: http://localhost:${port}/api/docs`);
 }
 
 void bootstrap();

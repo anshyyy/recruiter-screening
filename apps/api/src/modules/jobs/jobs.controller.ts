@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiNotFoundResponse,
@@ -45,8 +46,9 @@ export class JobsController {
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Apply to a job (authenticated)' })
+  @ApiOperation({ summary: 'Apply to a job (authenticated); requires profile skills + résumé' })
   @ApiCreatedResponse({ description: 'Application created' })
+  @ApiBadRequestResponse({ description: 'Profile incomplete (skills / résumé)' })
   @ApiNotFoundResponse({ description: 'Job does not exist' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
   async apply(

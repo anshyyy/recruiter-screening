@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { canSaveProfileSkills, SAVE_SKILLS_REQUIRES_ONE_MESSAGE } from '@/lib/profile-readiness';
 
 export type ProfileSkillsEditorProps = {
   initialSkills: string[];
@@ -16,11 +17,6 @@ export function ProfileSkillsEditor({ initialSkills, disabled, onSave }: Profile
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const skillsFingerprint = initialSkills.join('\u0000');
-  useEffect(() => {
-    setSkills(initialSkills);
-  }, [skillsFingerprint, initialSkills]);
 
   function addSkill() {
     const t = draft.trim();
@@ -38,6 +34,11 @@ export function ProfileSkillsEditor({ initialSkills, disabled, onSave }: Profile
   }
 
   async function handleSave() {
+    if (!canSaveProfileSkills(skills)) {
+      setError(SAVE_SKILLS_REQUIRES_ONE_MESSAGE);
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
@@ -52,6 +53,8 @@ export function ProfileSkillsEditor({ initialSkills, disabled, onSave }: Profile
   function removeSkill(tag: string) {
     setSkills((prev) => prev.filter((s) => s !== tag));
   }
+
+  const saveAllowed = canSaveProfileSkills(skills);
 
   return (
     <div className="space-y-4">
@@ -113,7 +116,8 @@ export function ProfileSkillsEditor({ initialSkills, disabled, onSave }: Profile
       <button
         type="button"
         onClick={() => void handleSave()}
-        disabled={disabled || saving}
+        disabled={disabled || saving || !saveAllowed}
+        title={!saveAllowed ? SAVE_SKILLS_REQUIRES_ONE_MESSAGE : undefined}
         className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-60 dark:bg-indigo-500 dark:hover:bg-indigo-400"
       >
         {saving ? 'Saving…' : 'Save skills'}

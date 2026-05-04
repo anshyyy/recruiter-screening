@@ -14,6 +14,7 @@ export type AuthUser = {
   skills: string[];
   resumeObjectKey: string | null;
   resumeFileName: string | null;
+  phoneNumber: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -22,6 +23,16 @@ export type AuthTokens = {
   accessToken: string;
   user: AuthUser;
 };
+
+function normalizeAuthUser(u: AuthUser): AuthUser {
+  return {
+    ...u,
+    skills: Array.isArray(u.skills) ? u.skills : [],
+    resumeObjectKey: u.resumeObjectKey ?? null,
+    resumeFileName: u.resumeFileName ?? null,
+    phoneNumber: u.phoneNumber ?? null,
+  };
+}
 
 /** Reads the JWT from Zustand (`useAuthStore`), which mirrors `localStorage`. */
 export function getStoredAccessToken(): string | null {
@@ -53,7 +64,7 @@ export async function postLogin(email: string, password: string, _role: LoginRol
   if (!isApiSuccess(body)) {
     throw new Error(body.message);
   }
-  return body.data;
+  return { ...body.data, user: normalizeAuthUser(body.data.user) };
 }
 
 export type RegisterInput = {
@@ -67,9 +78,10 @@ export type UpdateProfileInput = {
   skills?: string[];
   resumeObjectKey?: string | null;
   resumeFileName?: string | null;
+  phoneNumber?: string | null;
 };
 
-/** PATCH `/auth/me/profile` — skills and/or résumé metadata (after S3 upload). */
+/** PATCH `/auth/me/profile` — skills and/or résumé metadata (after `POST /uploads/file`). */
 export async function patchAuthProfile(accessToken: string, body: UpdateProfileInput): Promise<AuthUser> {
   const base = getPublicApiBaseUrl();
   const res = await fetch(`${base}/auth/me/profile`, {
@@ -84,7 +96,7 @@ export async function patchAuthProfile(accessToken: string, body: UpdateProfileI
   if (!isApiSuccess(parsed)) {
     throw new Error(parsed.message);
   }
-  return parsed.data;
+  return normalizeAuthUser(parsed.data);
 }
 
 /** GET `/auth/me` — current user from JWT. */
@@ -98,7 +110,7 @@ export async function fetchAuthMe(accessToken: string): Promise<AuthUser> {
   if (!isApiSuccess(body)) {
     throw new Error(body.message);
   }
-  return body.data;
+  return normalizeAuthUser(body.data);
 }
 
 export async function postRegister(input: RegisterInput): Promise<AuthTokens> {
@@ -117,5 +129,5 @@ export async function postRegister(input: RegisterInput): Promise<AuthTokens> {
   if (!isApiSuccess(body)) {
     throw new Error(body.message);
   }
-  return body.data;
+  return { ...body.data, user: normalizeAuthUser(body.data.user) };
 }

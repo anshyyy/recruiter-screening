@@ -2,11 +2,17 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { AppliedJobsSection } from '@/components/jobs/AppliedJobsSection';
+import {
+  candidateAppBarGhostButtonClass,
+  candidateAppBarGhostLinkClass,
+} from '@/components/layout/candidate-app-bar-actions';
 import { CandidateAppShell } from '@/components/layout/CandidateAppShell';
+import { ProfilePhoneCard } from '@/components/profile/ProfilePhoneCard';
 import { ProfileResumeCard } from '@/components/profile/ProfileResumeCard';
 import { ProfileSkillsEditor } from '@/components/profile/ProfileSkillsEditor';
+import { UnderlineTabs, type UnderlineTabItem } from '@/components/ui/UnderlineTabs';
 import type { AuthUser } from '@/lib/auth-api';
 import { fetchAuthMe, patchAuthProfile } from '@/lib/auth-api';
 import type { AppliedJobDto } from '@/lib/jobs-types';
@@ -14,6 +20,13 @@ import { fetchMyJobApplications } from '@/lib/jobs-api';
 import { isCandidateApplyReady } from '@/lib/profile-readiness';
 import { useAuthStore } from '@/stores/auth-store';
 import { useJobsDashboardStore } from '@/stores/jobs-dashboard-store';
+
+type ProfileTabId = 'details' | 'applications';
+
+const PROFILE_TABS: readonly UnderlineTabItem<ProfileTabId>[] = [
+  { id: 'details', label: 'Account & profile' },
+  { id: 'applications', label: 'Applied jobs' },
+];
 
 /**
  * Account, candidate profile (skills + résumé), and applications — loaded from the API.
@@ -28,6 +41,8 @@ export function ProfileScreen() {
   const [applications, setApplications] = useState<AppliedJobDto[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<ProfileTabId>('details');
+  const profileTabsIdPrefix = useId();
 
   const redirectToLogin = useCallback(() => {
     router.replace('/login');
@@ -90,29 +105,14 @@ export function ProfileScreen() {
 
   return (
     <CandidateAppShell
-      leadingNav={
-        <Link
-          href="/jobs"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition-colors hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:border-indigo-500/40 dark:hover:bg-indigo-950/40"
-        >
-          ← Jobs
-        </Link>
-      }
       title="Profile"
       subtitle="Résumé and skills are attached to every job application."
       actions={
         <>
-          <Link
-            href="/"
-            className="rounded-lg px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-          >
+          <Link href="/" className={candidateAppBarGhostLinkClass}>
             Home
           </Link>
-          <button
-            type="button"
-            onClick={handleSignOut}
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-          >
+          <button type="button" onClick={handleSignOut} className={candidateAppBarGhostButtonClass}>
             Sign out
           </button>
         </>
@@ -136,86 +136,136 @@ export function ProfileScreen() {
           Loading profile…
         </div>
       ) : user && token ? (
-        <div className="flex flex-col gap-8">
+        <div className="flex flex-col gap-6">
           {!applyReady ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/35 dark:text-amber-100">
-              <strong className="font-semibold">Complete your profile to apply.</strong> Add at least one skill and upload a PDF résumé below.
-              Recruiters receive the skills and file you submit here with each application.
+              <strong className="font-semibold">Complete your profile to apply.</strong> Add at least one skill, upload a PDF résumé, and add a
+              phone number for the AI screening call.
             </div>
           ) : (
             <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-950 shadow-sm dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-100">
-              You are ready to apply — your résumé and skills will be sent with each application.
+              You are ready to apply — résumé, skills, and phone number are on file.
             </div>
           )}
 
-          <section
-            className="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-md shadow-zinc-900/5 ring-1 ring-black/[0.03] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80 dark:ring-white/[0.06]"
-            aria-labelledby="account-heading"
-          >
-            <h2 id="account-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-              Account
-            </h2>
-            <dl className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Email</dt>
-                <dd className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">{user.email}</dd>
-              </div>
-              {user.fullName ? (
-                <div>
-                  <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Name</dt>
-                  <dd className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">{user.fullName}</dd>
-                </div>
-              ) : null}
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Role</dt>
-                <dd className="mt-1 text-sm font-medium capitalize text-zinc-900 dark:text-zinc-100">{user.role ?? 'user'}</dd>
-              </div>
-            </dl>
-          </section>
+          <UnderlineTabs
+            idPrefix={profileTabsIdPrefix}
+            tabs={PROFILE_TABS}
+            value={activeTab}
+            onChange={setActiveTab}
+            ariaLabel="Profile sections"
+          />
 
-          <section
-            className="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-md shadow-zinc-900/5 ring-1 ring-black/[0.03] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80 dark:ring-white/[0.06]"
-            aria-labelledby="skills-heading"
+          <div
+            role="tabpanel"
+            id={`${profileTabsIdPrefix}-panel-details`}
+            aria-labelledby={`${profileTabsIdPrefix}-tab-details`}
+            hidden={activeTab !== 'details'}
+            tabIndex={0}
+            className={activeTab === 'details' ? 'mt-2 flex flex-col gap-8 outline-none' : undefined}
           >
-            <h2 id="skills-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-              Skills
-            </h2>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">These tags are stored on your profile and snapshotted when you apply.</p>
-            <div className="mt-5">
-              <ProfileSkillsEditor
-                initialSkills={Array.isArray(user.skills) ? user.skills : []}
-                onSave={async (skills) => {
-                  const updated = await patchAuthProfile(token, { skills });
-                  setUser(updated);
-                  syncCandidateToJobsStore(updated);
-                }}
-              />
-            </div>
-          </section>
+            {activeTab === 'details' ? (
+              <>
+                <section
+                  className="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-md shadow-zinc-900/5 ring-1 ring-black/[0.03] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80 dark:ring-white/[0.06]"
+                  aria-labelledby="account-heading"
+                >
+                  <h2 id="account-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                    Account
+                  </h2>
+                  <dl className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Email</dt>
+                      <dd className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">{user.email}</dd>
+                    </div>
+                    {user.fullName ? (
+                      <div>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Name</dt>
+                        <dd className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100">{user.fullName}</dd>
+                      </div>
+                    ) : null}
+                    <div>
+                      <dt className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Role</dt>
+                      <dd className="mt-1 text-sm font-medium capitalize text-zinc-900 dark:text-zinc-100">{user.role ?? 'user'}</dd>
+                    </div>
+                  </dl>
+                </section>
 
-          <section
-            className="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-md shadow-zinc-900/5 ring-1 ring-black/[0.03] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80 dark:ring-white/[0.06]"
-            aria-labelledby="resume-heading"
+                <section
+                  className="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-md shadow-zinc-900/5 ring-1 ring-black/[0.03] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80 dark:ring-white/[0.06]"
+                  aria-labelledby="skills-heading"
+                >
+                  <h2 id="skills-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                    Skills
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">These tags are stored on your profile and snapshotted when you apply.</p>
+                  <div className="mt-5">
+                    <ProfileSkillsEditor
+                      key={(Array.isArray(user.skills) ? user.skills : []).join('|')}
+                      initialSkills={Array.isArray(user.skills) ? user.skills : []}
+                      onSave={async (skills) => {
+                        const updated = await patchAuthProfile(token, { skills });
+                        setUser(updated);
+                        syncCandidateToJobsStore(updated);
+                      }}
+                    />
+                  </div>
+                </section>
+
+                <section
+                  className="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-md shadow-zinc-900/5 ring-1 ring-black/[0.03] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80 dark:ring-white/[0.06]"
+                  aria-labelledby="phone-heading"
+                >
+                  <h2 id="phone-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                    Phone for AI screening
+                  </h2>
+                  <div className="mt-5">
+                    <ProfilePhoneCard
+                      accessToken={token}
+                      user={user}
+                      onProfileUpdated={(next) => {
+                        setUser(next);
+                        syncCandidateToJobsStore(next);
+                      }}
+                    />
+                  </div>
+                </section>
+
+                <section
+                  className="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-md shadow-zinc-900/5 ring-1 ring-black/[0.03] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80 dark:ring-white/[0.06]"
+                  aria-labelledby="resume-heading"
+                >
+                  <h2 id="resume-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
+                    Résumé
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                    PDF only. If uploads are not configured on the server, you will see an error — set S3 env vars in the API.
+                  </p>
+                  <div className="mt-5">
+                    <ProfileResumeCard
+                      accessToken={token}
+                      user={user}
+                      onProfileUpdated={(next) => {
+                        setUser(next);
+                        syncCandidateToJobsStore(next);
+                      }}
+                    />
+                  </div>
+                </section>
+              </>
+            ) : null}
+          </div>
+
+          <div
+            role="tabpanel"
+            id={`${profileTabsIdPrefix}-panel-applications`}
+            aria-labelledby={`${profileTabsIdPrefix}-tab-applications`}
+            hidden={activeTab !== 'applications'}
+            tabIndex={0}
+            className={activeTab === 'applications' ? 'mt-2 outline-none' : undefined}
           >
-            <h2 id="resume-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
-              Résumé
-            </h2>
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              PDF only. If uploads are not configured on the server, you will see an error — set S3 env vars in the API.
-            </p>
-            <div className="mt-5">
-              <ProfileResumeCard
-                accessToken={token}
-                user={user}
-                onProfileUpdated={(next) => {
-                  setUser(next);
-                  syncCandidateToJobsStore(next);
-                }}
-              />
-            </div>
-          </section>
-
-          <AppliedJobsSection applications={applications} />
+            {activeTab === 'applications' ? <AppliedJobsSection applications={applications} /> : null}
+          </div>
         </div>
       ) : !loadError ? (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">No profile data.</p>

@@ -8,6 +8,7 @@ import {
   Unique,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
+import { ApplicationPipelinePhase } from '../enums/application-pipeline-phase.enum';
 import { Job } from './job.entity';
 
 /** One row per user per job they applied to. */
@@ -40,6 +41,18 @@ export class JobApplication {
 
   @Column({ type: 'varchar', length: 260, nullable: true, name: 'resume_file_name_snapshot' })
   resumeFileNameSnapshot!: string | null;
+
+  /** Phone number captured at apply time, used to dial the candidate for AI screening. */
+  @Column({ type: 'varchar', length: 24, nullable: true, name: 'phone_number_snapshot' })
+  phoneNumberSnapshot!: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 24,
+    name: 'pipeline_phase',
+    default: ApplicationPipelinePhase.SCREENING,
+  })
+  pipelinePhase!: ApplicationPipelinePhase;
 
   @CreateDateColumn({ name: 'applied_at', type: 'timestamptz' })
   appliedAt!: Date;

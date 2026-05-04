@@ -96,6 +96,7 @@ export class AuthController {
       skills: dto.skills,
       resumeObjectKey: dto.resumeObjectKey,
       resumeFileName: dto.resumeFileName,
+      phoneNumber: dto.phoneNumber,
     });
   }
 }
