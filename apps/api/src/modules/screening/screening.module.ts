@@ -7,6 +7,7 @@ import { UsersModule } from '../users/users.module';
 import { BolnaClient } from './bolna.client';
 import { ScreeningSession } from './entities/screening-session.entity';
 import { ResumeTextExtractor } from './resume-text.extractor';
+import { ScreeningLlmScoringService } from './llm-scoring/screening-llm-scoring.service';
 import { ScreeningController } from './screening.controller';
 import { ScreeningService } from './screening.service';
 
@@ -18,7 +19,7 @@ import { ScreeningService } from './screening.service';
     UploadModule,
   ],
   controllers: [ScreeningController],
-  providers: [ScreeningService, BolnaClient, ResumeTextExtractor],
+  providers: [ScreeningService, ScreeningLlmScoringService, BolnaClient, ResumeTextExtractor],
   exports: [ScreeningService],
 })
 export class ScreeningModule {}

@@ -133,6 +133,18 @@ export function AdminDashboard() {
     };
   }, [authChecked, accessToken, selectedJobId]);
 
+  const refreshApplicationsList = useCallback(async () => {
+    if (!accessToken || !selectedJobId) {
+      return;
+    }
+    try {
+      const list = await fetchAdminApplicationsForJob(accessToken, selectedJobId);
+      setApplications(list);
+    } catch (e) {
+      setApplicationsError(e instanceof Error ? e.message : 'Failed to refresh applications');
+    }
+  }, [accessToken, selectedJobId]);
+
   function handleSignOut() {
     clearAccessToken();
     router.replace('/login');
@@ -161,7 +173,7 @@ export function AdminDashboard() {
     <>
       <AdminAppShell
         title="Applications"
-        subtitle="Select a job to see candidates, pipeline stage, and AI screening results. Open a row for the full transcript and summary."
+        subtitle="Select a job to see candidates, pipeline stage, and AI screening results. Open a row for details; use Rescore screening if the score needs to be recomputed."
         actions={
           <>
             <Link href="/" className={ghostButtonClass}>
@@ -240,6 +252,7 @@ export function AdminDashboard() {
         applicationId={detailApplicationId}
         accessToken={accessToken}
         onClose={() => setDetailApplicationId(null)}
+        onRescoreComplete={() => void refreshApplicationsList()}
       />
     </>
   );

@@ -1,5 +1,15 @@
-import { Controller, Get, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
 import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -15,8 +25,10 @@ import {
   AdminApplicationDetailDto,
   AdminApplicationListItemDto,
   AdminJobListItemDto,
+  RescoreScreeningResponseDto,
 } from './dto/admin-api.dto';
 import { AdminService } from './admin.service';
+import { ScreeningService } from '../screening/screening.service';
 
 @ApiTags('admin')
 @Controller('admin')
@@ -26,7 +38,10 @@ import { AdminService } from './admin.service';
 @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
 @ApiForbiddenResponse({ description: 'Not an administrator' })
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly screeningService: ScreeningService,
+  ) {}
 
   @Get('jobs')
   @ApiOperation({ summary: 'List jobs with application counts (admin)' })
@@ -55,5 +70,20 @@ export class AdminController {
     @Param('applicationId', ParseUUIDPipe) applicationId: string,
   ): Promise<AdminApplicationDetailDto> {
     return this.adminService.getApplicationDetail(applicationId);
+  }
+
+  @Post('applications/:applicationId/rescore-screening')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Recompute screening score from stored transcript (heuristic + configured LLM). Use after a failed or missing score.',
+  })
+  @ApiOkResponse({ type: RescoreScreeningResponseDto })
+  @ApiNotFoundResponse({ description: 'No screening session for this application' })
+  @ApiBadRequestResponse({ description: 'Transcript missing on session' })
+  async rescoreScreening(
+    @Param('applicationId', ParseUUIDPipe) applicationId: string,
+  ): Promise<RescoreScreeningResponseDto> {
+    return this.screeningService.rescoreScreeningForApplication(applicationId);
   }
 }

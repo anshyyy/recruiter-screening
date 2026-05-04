@@ -26,6 +26,8 @@ import {
   ScreeningStatus,
 } from './enums/screening-status.enum';
 import { ResumeTextExtractor } from './resume-text.extractor';
+import { ScreeningLlmScoringService } from './llm-scoring/screening-llm-scoring.service';
+import { deriveScreeningScoreFromTranscript } from './transcript-derived-score';
 
 const DEFAULT_MAX_ATTEMPTS = 2;
 const DEFAULT_PASS_THRESHOLD = 0.7;
@@ -43,6 +45,7 @@ export class ScreeningService {
     private readonly bolna: BolnaClient,
     private readonly usersService: UsersService,
     private readonly resumeTextExtractor: ResumeTextExtractor,
+    private readonly screeningLlmScoring: ScreeningLlmScoringService,
     private readonly config: ConfigService,
   ) {}
 
@@ -213,7 +216,7 @@ export class ScreeningService {
 
       const session = await this.sessionsRepo.findOne({
         where: { bolnaExecutionId: executionId },
-        relations: { application: true },
+        relations: { application: { job: true } },
       });
       if (!session) {
         this.logger.warn(`handleWebhook: no session for executionId=${executionId}`);
@@ -310,6 +313,7 @@ export class ScreeningService {
         'audio_url',
         'media_url',
       ]) ?? session.recordingUrl;
+
     session.summary =
       pickStringFromRoots(roots, [
         'summary',
@@ -324,11 +328,19 @@ export class ScreeningService {
       session.transcript = transcript;
     }
     const extracted = parseExtractedDataFromRoots(roots);
-    if (extracted) {
-      session.extractedData = extracted;
+
+    const application = session.application;
+    const scoreBundle = await this.computeScoresFromTranscriptContext({
+      transcriptTurns: transcript ?? [],
+      application,
+      providerExtractedMergeBase: { ...(extracted ?? {}) },
+    });
+
+    if (Object.keys(scoreBundle.mergedExtracted).length > 0) {
+      session.extractedData = scoreBundle.mergedExtracted;
     }
 
-    const score = this.computeScoreFromRoots(roots, session.extractedData);
+    const score = scoreBundle.finalScore01;
     if (score !== null) {
       session.score = score.toFixed(2);
     }
@@ -350,49 +362,125 @@ export class ScreeningService {
         `score=${score ?? 'null'}`,
     );
 
-    const nextPhase = this.decidePhase(score);
-    if (nextPhase && nextPhase !== session.application.pipelinePhase) {
-      await this.applicationsRepo.update(
-        { id: session.applicationId },
-        { pipelinePhase: nextPhase },
-      );
+    const phaseAfter = await this.syncPipelinePhaseFromScore(session.applicationId, score);
+    this.logger.log(
+      `applyCompletion: applicationId=${session.applicationId} pipelinePhase→${phaseAfter}`,
+    );
+  }
+
+  /**
+   * Admin: re-run heuristic + LLM scoring using the **stored** transcript (e.g. after LLM outage or config fix).
+   */
+  async rescoreScreeningForApplication(applicationId: string): Promise<{
+    applicationId: string;
+    sessionId: string;
+    score: string | null;
+    scoreComputed: boolean;
+    pipelinePhase: ApplicationPipelinePhase;
+  }> {
+    try {
+      const session = await this.sessionsRepo.findOne({
+        where: { applicationId },
+        relations: { application: { job: true } },
+      });
+      if (!session) {
+        throw new NotFoundException('No screening session for this application.');
+      }
+      if (!session.transcript?.length) {
+        throw new BadRequestException(
+          'Cannot rescore: no transcript stored on this session. Wait for a completed screening call first.',
+        );
+      }
+
+      const baseExtracted = stripScoringKeysFromExtracted(session.extractedData);
+      const scoreBundle = await this.computeScoresFromTranscriptContext({
+        transcriptTurns: session.transcript,
+        application: session.application,
+        providerExtractedMergeBase: baseExtracted,
+      });
+
+      session.extractedData = scoreBundle.mergedExtracted;
+      if (scoreBundle.finalScore01 !== null) {
+        session.score = scoreBundle.finalScore01.toFixed(2);
+      } else {
+        session.score = null;
+      }
+      await this.sessionsRepo.save(session);
+
+      const pipelinePhase = await this.syncPipelinePhaseFromScore(applicationId, scoreBundle.finalScore01);
       this.logger.log(
-        `applyCompletion: applicationId=${session.applicationId} phase ${session.application.pipelinePhase} → ${nextPhase}`,
+        `rescoreScreeningForApplication: applicationId=${applicationId} sessionId=${session.id} score=${scoreBundle.finalScore01 ?? 'null'} phase=${pipelinePhase}`,
       );
-    } else {
-      this.logger.log(
-        `applyCompletion: applicationId=${session.applicationId} phase=${session.application.pipelinePhase} unchanged`,
-      );
+
+      return {
+        applicationId,
+        sessionId: session.id,
+        score: session.score,
+        scoreComputed: scoreBundle.finalScore01 !== null,
+        pipelinePhase,
+      };
+    } catch (error: unknown) {
+      handleServiceError(this.logger, 'ScreeningService.rescoreScreeningForApplication', error);
     }
   }
 
-  private computeScoreFromRoots(
-    roots: Record<string, unknown>[],
-    extracted: ScreeningExtractedData | null,
-  ): number | null {
-    const direct = pickNumberFromRoots(roots, [
-      'score',
-      'fit_score',
-      'overall_score',
-      'evaluation_score',
-      'match_score',
-    ]);
-    if (direct !== null) {
-      return clamp01(direct);
+  private async computeScoresFromTranscriptContext(params: {
+    transcriptTurns: ScreeningTranscriptTurn[];
+    application: JobApplication;
+    providerExtractedMergeBase: ScreeningExtractedData;
+  }): Promise<{ finalScore01: number | null; mergedExtracted: ScreeningExtractedData }> {
+    const jobDescription = params.application.job?.description ?? '';
+    const skillsSnapshot = params.application.skillsSnapshot;
+    const applicationSkills = Array.isArray(skillsSnapshot) ? skillsSnapshot : [];
+
+    const heuristic = deriveScreeningScoreFromTranscript({
+      turns: params.transcriptTurns,
+      applicationSkills,
+      jobDescription,
+    });
+
+    const mergedExtracted: ScreeningExtractedData = { ...params.providerExtractedMergeBase };
+    if (heuristic.rubric) {
+      mergedExtracted.transcript_derived_rubric = heuristic.rubric;
     }
-    if (extracted) {
-      const fromExtracted = pickNumber(extracted as Record<string, unknown>, ['score', 'fit_score']);
-      if (fromExtracted !== null) {
-        return clamp01(fromExtracted);
+
+    let finalScore01 = heuristic.score01;
+    const job = params.application.job;
+    const hasTranscript = params.transcriptTurns.length > 0;
+    const llmSnapshot = hasTranscript
+      ? await this.screeningLlmScoring.scoreTranscript({
+          jobTitle: job?.title ?? 'Role',
+          company: job?.company ?? 'Company',
+          jobDescription,
+          applicationSkills,
+          transcriptTurns: params.transcriptTurns,
+        })
+      : null;
+    if (llmSnapshot) {
+      mergedExtracted.llm_screening = llmSnapshot;
+      if (llmSnapshot.score01 !== null) {
+        finalScore01 = llmSnapshot.score01;
       }
-      const recommendation = pickString(extracted as Record<string, unknown>, [
-        'recommendation',
-        'decision',
-      ])?.toLowerCase();
-      if (recommendation === 'pass' || recommendation === 'advance') return 1;
-      if (recommendation === 'fail' || recommendation === 'reject') return 0;
     }
-    return null;
+
+    return { finalScore01, mergedExtracted };
+  }
+
+  private async syncPipelinePhaseFromScore(
+    applicationId: string,
+    score: number | null,
+  ): Promise<ApplicationPipelinePhase> {
+    const appRow = await this.applicationsRepo.findOne({ where: { id: applicationId } });
+    if (!appRow) {
+      throw new NotFoundException('Application not found');
+    }
+    const current = appRow.pipelinePhase ?? ApplicationPipelinePhase.SCREENING;
+    const nextPhase = this.decidePhase(score);
+    if (nextPhase && nextPhase !== current) {
+      await this.applicationsRepo.update({ id: applicationId }, { pipelinePhase: nextPhase });
+      return nextPhase;
+    }
+    return current;
   }
 
   private decidePhase(score: number | null): ApplicationPipelinePhase | null {
@@ -533,18 +621,6 @@ function pickString(obj: Record<string, unknown> | null, keys: string[]): string
   return null;
 }
 
-function pickNumber(obj: Record<string, unknown>, keys: string[]): number | null {
-  for (const k of keys) {
-    const v = obj[k];
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
-    if (typeof v === 'string') {
-      const n = Number(v);
-      if (Number.isFinite(n)) return n;
-    }
-  }
-  return null;
-}
-
 function pickStringFromRoots(
   roots: Record<string, unknown>[],
   keys: string[],
@@ -552,17 +628,6 @@ function pickStringFromRoots(
   for (const r of roots) {
     const s = pickString(r, keys);
     if (s) return s;
-  }
-  return null;
-}
-
-function pickNumberFromRoots(
-  roots: Record<string, unknown>[],
-  keys: string[],
-): number | null {
-  for (const r of roots) {
-    const n = pickNumber(r, keys);
-    if (n !== null) return n;
   }
   return null;
 }
@@ -580,6 +645,8 @@ const WEBHOOK_NEST_KEYS = [
   'analysis',
   'metadata',
   'response',
+  /** Bolna stores `recording_url` here on completed calls. */
+  'telephony_data',
 ] as const;
 
 function webhookSearchRoots(payload: Record<string, unknown>): Record<string, unknown>[] {
@@ -627,13 +694,6 @@ function parseExtractedDataFromRoots(
     if (e && Object.keys(e).length > 0) return e;
   }
   return null;
-}
-
-function clamp01(n: number): number {
-  if (n < 0) return 0;
-  if (n > 1 && n <= 100) return n / 100;
-  if (n > 1) return 1;
-  return n;
 }
 
 function parseTranscript(payload: Record<string, unknown>): ScreeningTranscriptTurn[] | null {
@@ -756,4 +816,17 @@ function parseExtractedData(payload: Record<string, unknown>): ScreeningExtracte
     }
   }
   return null;
+}
+
+/** Drops our scoring artifacts so a rescore can replace them without losing vendor extraction fields. */
+function stripScoringKeysFromExtracted(
+  data: ScreeningExtractedData | null | undefined,
+): ScreeningExtractedData {
+  if (!data) {
+    return {};
+  }
+  const copy: Record<string, unknown> = { ...data };
+  delete copy.transcript_derived_rubric;
+  delete copy.llm_screening;
+  return copy as ScreeningExtractedData;
 }

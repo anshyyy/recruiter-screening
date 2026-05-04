@@ -61,6 +61,15 @@ export type AdminJobSummary = {
   employmentType: EmploymentType | null;
 };
 
+/** `POST /admin/applications/:applicationId/rescore-screening` */
+export type AdminRescoreScreeningResult = {
+  applicationId: string;
+  sessionId: string;
+  score: string | null;
+  scoreComputed: boolean;
+  pipelinePhase: ApplicationPipelinePhase;
+};
+
 export type AdminApplicationDetail = {
   applicationId: string;
   appliedAt: string;

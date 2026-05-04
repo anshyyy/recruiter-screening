@@ -4,6 +4,7 @@ import type {
   AdminApplicationDetail,
   AdminApplicationListItem,
   AdminJobListItem,
+  AdminRescoreScreeningResult,
 } from '@/lib/admin-types';
 import { getPublicApiBaseUrl } from '@/lib/public-env';
 import { readApiBody } from '@/lib/read-api-body';
@@ -48,5 +49,22 @@ export async function fetchAdminApplicationDetail(
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   const body = await readApiBody<AdminApplicationDetail>(res);
+  return throwUnlessSuccess(body);
+}
+
+/** Recompute heuristic + LLM scores from the stored transcript (admin). */
+export async function postAdminRescoreScreening(
+  accessToken: string,
+  applicationId: string,
+): Promise<AdminRescoreScreeningResult> {
+  const base = getPublicApiBaseUrl();
+  const res = await fetch(`${base}/admin/applications/${applicationId}/rescore-screening`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  const body = await readApiBody<AdminRescoreScreeningResult>(res);
   return throwUnlessSuccess(body);
 }

@@ -128,6 +128,27 @@ export class AdminJobSummaryDto {
   employmentType!: EmploymentType | null;
 }
 
+/** Result of `POST /admin/applications/:applicationId/rescore-screening`. */
+export class RescoreScreeningResponseDto {
+  @ApiProperty()
+  applicationId!: string;
+
+  @ApiProperty()
+  sessionId!: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'Stored numeric score (0–1) as string; null if neither heuristic nor LLM produced a score',
+  })
+  score!: string | null;
+
+  @ApiProperty({ description: 'True when a numeric score was written to the session' })
+  scoreComputed!: boolean;
+
+  @ApiProperty({ enum: ApplicationPipelinePhase })
+  pipelinePhase!: ApplicationPipelinePhase;
+}
+
 export class AdminApplicationDetailDto {
   @ApiProperty()
   applicationId!: string;

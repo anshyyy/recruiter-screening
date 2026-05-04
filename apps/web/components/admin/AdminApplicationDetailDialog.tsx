@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useState } from 'react';
 import type { AdminApplicationDetail } from '@/lib/admin-types';
-import { fetchAdminApplicationDetail } from '@/lib/admin-api';
+import { fetchAdminApplicationDetail, postAdminRescoreScreening } from '@/lib/admin-api';
 import { labelAdminPipelinePhase, labelAdminScreeningStatus } from '@/lib/admin-labels';
 import { normalizePipelinePhase } from '@/lib/application-timeline';
 import { labelForEmploymentType } from '@/lib/jobs-types';
@@ -35,6 +35,8 @@ export type AdminApplicationDetailDialogProps = {
   applicationId: string | null;
   accessToken: string;
   onClose: () => void;
+  /** Refetch applicant lists (e.g. after rescore updates the score column). */
+  onRescoreComplete?: (applicationId: string) => void;
 };
 
 /**
@@ -46,29 +48,39 @@ export function AdminApplicationDetailDialog({
   applicationId,
   accessToken,
   onClose,
+  onRescoreComplete,
 }: AdminApplicationDetailDialogProps) {
   const titleId = useId();
   const [detail, setDetail] = useState<AdminApplicationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [rescoring, setRescoring] = useState(false);
+  const [rescoreError, setRescoreError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!applicationId) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const d = await fetchAdminApplicationDetail(accessToken, applicationId);
-      setDetail(d);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to load application';
-      setError(message);
-      setDetail(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [accessToken, applicationId]);
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!applicationId) {
+        return;
+      }
+      if (!opts?.silent) {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const d = await fetchAdminApplicationDetail(accessToken, applicationId);
+        setDetail(d);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Failed to load application';
+        setError(message);
+        setDetail(null);
+      } finally {
+        if (!opts?.silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [accessToken, applicationId],
+  );
 
   useEffect(() => {
     if (open && applicationId) {
@@ -76,8 +88,26 @@ export function AdminApplicationDetailDialog({
     } else if (!open) {
       setDetail(null);
       setError(null);
+      setRescoreError(null);
     }
   }, [open, applicationId, load]);
+
+  const handleRescore = useCallback(async () => {
+    if (!applicationId) {
+      return;
+    }
+    setRescoring(true);
+    setRescoreError(null);
+    try {
+      await postAdminRescoreScreening(accessToken, applicationId);
+      await load({ silent: true });
+      onRescoreComplete?.(applicationId);
+    } catch (e) {
+      setRescoreError(e instanceof Error ? e.message : 'Rescore failed');
+    } finally {
+      setRescoring(false);
+    }
+  }, [accessToken, applicationId, load, onRescoreComplete]);
 
   if (!open) {
     return null;
@@ -103,7 +133,7 @@ export function AdminApplicationDetailDialog({
         className="flex max-h-[min(100dvh,900px)] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950 sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
+        <div className="flex shrink-0 flex-col gap-3 border-b border-zinc-200 px-5 py-4 dark:border-zinc-800 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0">
             <h2 id={titleId} className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
               Application detail
@@ -114,14 +144,36 @@ export function AdminApplicationDetailDialog({
               </p>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900"
-          >
-            Close
-          </button>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {applicationId ? (
+              <button
+                type="button"
+                onClick={() => void handleRescore()}
+                disabled={loading || rescoring}
+                className="rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-900 transition hover:bg-violet-100 disabled:opacity-50 dark:border-violet-800 dark:bg-violet-950/50 dark:text-violet-100 dark:hover:bg-violet-900/60"
+                title="Re-run heuristic + LLM scoring from the stored transcript"
+              >
+                {rescoring ? 'Rescoring…' : 'Rescore screening'}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-900"
+            >
+              Close
+            </button>
+          </div>
         </div>
+
+        {rescoreError ? (
+          <div
+            className="shrink-0 border-b border-red-200 bg-red-50/90 px-5 py-2 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-100"
+            role="alert"
+          >
+            {rescoreError}
+          </div>
+        ) : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
