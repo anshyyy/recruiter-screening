@@ -440,6 +440,9 @@ export class ScreeningService {
       if (!existing.application) {
         existing.application = application;
       }
+      this.logger.debug(
+        `ensureSession: reuse sessionId=${existing.id} applicationId=${application.id} status=${existing.status}`,
+      );
       return existing;
     }
     const created = this.sessionsRepo.create({

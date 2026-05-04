@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Logger,
   Param,
   ParseUUIDPipe,
   Post,
@@ -28,6 +29,8 @@ import { ScreeningService } from './screening.service';
 @ApiTags('screening')
 @Controller('screening')
 export class ScreeningController {
+  private readonly logger = new Logger(ScreeningController.name);
+
   constructor(private readonly screeningService: ScreeningService) {}
 
   @Get('sessions/by-application/:applicationId')
