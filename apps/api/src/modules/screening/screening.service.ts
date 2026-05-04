@@ -25,6 +25,7 @@ import {
   RETRYABLE_SCREENING_STATUSES,
   ScreeningStatus,
 } from './enums/screening-status.enum';
+import { ResumeTextExtractor } from './resume-text.extractor';
 
 const DEFAULT_MAX_ATTEMPTS = 2;
 const DEFAULT_PASS_THRESHOLD = 0.7;
@@ -41,6 +42,7 @@ export class ScreeningService {
     private readonly applicationsRepo: Repository<JobApplication>,
     private readonly bolna: BolnaClient,
     private readonly usersService: UsersService,
+    private readonly resumeTextExtractor: ResumeTextExtractor,
     private readonly config: ConfigService,
   ) {}
 
@@ -89,13 +91,24 @@ export class ScreeningService {
         );
         throw new ConflictException('Screening has already concluded for this application.');
       }
-      const phone = application.phoneNumberSnapshot;
+
+      // Snapshot is best-effort (older applications may have applied before phone was a profile field).
+      // Fall back to the candidate's current profile phone, and backfill the snapshot for consistency.
+      const candidate = await this.usersService.findById(userId);
+      const phone = application.phoneNumberSnapshot ?? candidate?.phoneNumber ?? null;
       if (!phone) {
         this.logger.warn(
-          `startScreening: refused — applicationId=${applicationId} has no phoneNumberSnapshot`,
+          `startScreening: refused — applicationId=${applicationId} has no phone (snapshot=null, profile=null)`,
         );
         throw new BadRequestException(
-          'No phone number on this application. Update your profile and re-apply.',
+          'No phone number on file. Add a phone number to your profile, then start the screening call.',
+        );
+      }
+      if (!application.phoneNumberSnapshot && candidate?.phoneNumber) {
+        application.phoneNumberSnapshot = candidate.phoneNumber;
+        await this.applicationsRepo.save(application);
+        this.logger.log(
+          `startScreening: backfilled phoneNumberSnapshot for applicationId=${applicationId}`,
         );
       }
 
@@ -136,14 +149,17 @@ export class ScreeningService {
         );
       }
 
-      const candidate = await this.usersService.findById(userId);
       const job = application.job;
+      const resumeText = await this.resumeTextExtractor.extract(
+        application.resumeObjectKeySnapshot,
+      );
       const context: BolnaCallContext = {
         candidateName: candidate?.fullName ?? null,
         jobTitle: job.title,
         company: job.company,
         jobDescription: job.description,
         skills: application.skillsSnapshot ?? [],
+        resumeText,
       };
 
       const { executionId } = await this.bolna.initiateCall({
@@ -281,24 +297,50 @@ export class ScreeningService {
   ): Promise<void> {
     session.status = ScreeningStatus.COMPLETED;
     session.completedAt = new Date();
-    session.recordingUrl = pickString(payload, ['recording_url', 'recordingUrl']) ?? session.recordingUrl;
-    session.summary = pickString(payload, ['summary']) ?? session.summary;
 
-    const transcript = parseTranscript(payload);
+    /** Bolna often nests transcript/recording under `data`, `call`, `execution`, etc. */
+    const roots = webhookSearchRoots(payload);
+
+    session.recordingUrl =
+      pickStringFromRoots(roots, [
+        'recording_url',
+        'recordingUrl',
+        'recording',
+        'call_recording_url',
+        'audio_url',
+        'media_url',
+      ]) ?? session.recordingUrl;
+    session.summary =
+      pickStringFromRoots(roots, [
+        'summary',
+        'call_summary',
+        'conversation_summary',
+        'ai_summary',
+        'transcript_summary',
+      ]) ?? session.summary;
+
+    const transcript = parseTranscriptFromRoots(roots);
     if (transcript) {
       session.transcript = transcript;
     }
-    const extracted = parseExtractedData(payload);
+    const extracted = parseExtractedDataFromRoots(roots);
     if (extracted) {
       session.extractedData = extracted;
     }
 
-    const score = this.computeScore(payload, session.extractedData);
+    const score = this.computeScoreFromRoots(roots, session.extractedData);
     if (score !== null) {
       session.score = score.toFixed(2);
     }
 
     await this.sessionsRepo.save(session);
+
+    if (!transcript?.length && !session.recordingUrl && !session.summary && score === null) {
+      this.logger.warn(
+        `applyCompletion: little usable content from webhook — check Bolna payload shape. ` +
+          `topKeys=[${Object.keys(payload).slice(0, 12).join(',')}]`,
+      );
+    }
 
     this.logger.log(
       `applyCompletion: sessionId=${session.id} applicationId=${session.applicationId} ` +
@@ -324,11 +366,17 @@ export class ScreeningService {
     }
   }
 
-  private computeScore(
-    payload: Record<string, unknown>,
+  private computeScoreFromRoots(
+    roots: Record<string, unknown>[],
     extracted: ScreeningExtractedData | null,
   ): number | null {
-    const direct = pickNumber(payload, ['score', 'fit_score']);
+    const direct = pickNumberFromRoots(roots, [
+      'score',
+      'fit_score',
+      'overall_score',
+      'evaluation_score',
+      'match_score',
+    ]);
     if (direct !== null) {
       return clamp01(direct);
     }
@@ -373,6 +421,9 @@ export class ScreeningService {
       'started',
       'call_started',
       'call_initiated',
+      /** Emitted when the PSTN leg hangs up; a later `completed` usually follows with artifacts. */
+      'call_disconnected',
+      'disconnected',
     ].includes(t);
   }
   private isCompletedEvent(t: string): boolean {
@@ -494,6 +545,90 @@ function pickNumber(obj: Record<string, unknown>, keys: string[]): number | null
   return null;
 }
 
+function pickStringFromRoots(
+  roots: Record<string, unknown>[],
+  keys: string[],
+): string | null {
+  for (const r of roots) {
+    const s = pickString(r, keys);
+    if (s) return s;
+  }
+  return null;
+}
+
+function pickNumberFromRoots(
+  roots: Record<string, unknown>[],
+  keys: string[],
+): number | null {
+  for (const r of roots) {
+    const n = pickNumber(r, keys);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+/** Shallow + one-level nested objects Bolna may use for webhook payloads. */
+const WEBHOOK_NEST_KEYS = [
+  'data',
+  'result',
+  'call',
+  'execution',
+  'payload',
+  'event_data',
+  'event',
+  'details',
+  'analysis',
+  'metadata',
+  'response',
+] as const;
+
+function webhookSearchRoots(payload: Record<string, unknown>): Record<string, unknown>[] {
+  const seen = new Set<Record<string, unknown>>();
+  const roots: Record<string, unknown>[] = [];
+
+  const add = (o: Record<string, unknown>) => {
+    if (seen.has(o)) return;
+    seen.add(o);
+    roots.push(o);
+  };
+
+  add(payload);
+  for (const k of WEBHOOK_NEST_KEYS) {
+    const v = payload[k];
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const child = v as Record<string, unknown>;
+      add(child);
+      for (const k2 of WEBHOOK_NEST_KEYS) {
+        const v2 = child[k2];
+        if (v2 && typeof v2 === 'object' && !Array.isArray(v2)) {
+          add(v2 as Record<string, unknown>);
+        }
+      }
+    }
+  }
+  return roots;
+}
+
+function parseTranscriptFromRoots(
+  roots: Record<string, unknown>[],
+): ScreeningTranscriptTurn[] | null {
+  for (const root of roots) {
+    const t = parseTranscript(root);
+    if (t && t.length > 0) return t;
+  }
+  return null;
+}
+
+function parseExtractedDataFromRoots(
+  roots: Record<string, unknown>[],
+): ScreeningExtractedData | null {
+  for (const root of roots) {
+    const e = parseExtractedData(root);
+    if (e && Object.keys(e).length > 0) return e;
+  }
+  return null;
+}
+
 function clamp01(n: number): number {
   if (n < 0) return 0;
   if (n > 1 && n <= 100) return n / 100;
@@ -502,26 +637,106 @@ function clamp01(n: number): number {
 }
 
 function parseTranscript(payload: Record<string, unknown>): ScreeningTranscriptTurn[] | null {
-  const raw = payload.transcript ?? payload.messages ?? payload.conversation;
-  if (!Array.isArray(raw)) return null;
+  const arrayKeys = [
+    'transcript',
+    'messages',
+    'conversation',
+    'chat_history',
+    'dialogue',
+    'turns',
+    'utterances',
+    'history',
+    'call_logs',
+  ];
+
+  for (const key of arrayKeys) {
+    const raw = payload[key];
+    if (Array.isArray(raw)) {
+      const turns = mapTranscriptArray(raw);
+      if (turns.length > 0) return turns;
+    }
+  }
+
+  const jsonish = pickString(payload, ['transcript', 'transcript_json']);
+  if (jsonish?.trim().startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(jsonish);
+      if (Array.isArray(parsed)) {
+        const turns = mapTranscriptArray(parsed);
+        if (turns.length > 0) return turns;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const textBlob = pickString(payload, [
+    'transcript',
+    'transcript_text',
+    'full_transcript',
+    'conversation_text',
+    'text',
+  ]);
+  if (textBlob && textBlob.trim().length > 0) {
+    const turns = parseLooseTranscriptString(textBlob);
+    if (turns.length > 0) return turns;
+  }
+
+  return null;
+}
+
+function mapTranscriptArray(raw: unknown[]): ScreeningTranscriptTurn[] {
   const turns: ScreeningTranscriptTurn[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const r = item as Record<string, unknown>;
-    const role = normalizeRole(pickString(r, ['role', 'speaker', 'from']));
-    const text = pickString(r, ['text', 'content', 'message']);
+    const role = normalizeRole(
+      pickString(r, ['role', 'speaker', 'from', 'source', 'voice', 'type']),
+    );
+    let text = pickString(r, ['text', 'content', 'message', 'utterance', 'value']);
+    if (!text && r.message && typeof r.message === 'object') {
+      text = pickString(r.message as Record<string, unknown>, ['text', 'content']);
+    }
     if (!role || !text) continue;
-    const at = pickString(r, ['at', 'timestamp', 'time']) ?? undefined;
+    const at = pickString(r, ['at', 'timestamp', 'time', 'created_at']) ?? undefined;
     turns.push({ role, text, at });
   }
-  return turns.length > 0 ? turns : null;
+  return turns;
+}
+
+/**
+ * Best-effort parse when the provider sends one block of text, e.g.
+ * "Agent: Hello\nUser: Hi" or lines prefixed with speaker labels.
+ */
+function parseLooseTranscriptString(blob: string): ScreeningTranscriptTurn[] {
+  const lines = blob.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const turns: ScreeningTranscriptTurn[] = [];
+  const labeled = /^((?:agent|assistant|bot|ai|user|candidate|human|caller|customer))\s*:\s*(.+)$/i;
+
+  for (const line of lines) {
+    const m = line.match(labeled);
+    if (!m) continue;
+    const role = normalizeRole(m[1]);
+    const text = m[2]?.trim();
+    if (role && text) turns.push({ role, text });
+  }
+  return turns;
 }
 
 function normalizeRole(s: string | null): ScreeningTranscriptTurn['role'] | null {
   if (!s) return null;
   const v = s.toLowerCase();
   if (v === 'agent' || v === 'assistant' || v === 'bot' || v === 'ai') return 'agent';
-  if (v === 'candidate' || v === 'user' || v === 'human' || v === 'caller') return 'candidate';
+  if (
+    v === 'candidate' ||
+    v === 'user' ||
+    v === 'human' ||
+    v === 'caller' ||
+    v === 'customer' ||
+    v === 'callee'
+  ) {
+    return 'candidate';
+  }
   if (v === 'system') return 'system';
   return null;
 }
@@ -532,6 +747,8 @@ function parseExtractedData(payload: Record<string, unknown>): ScreeningExtracte
     payload.extractedData,
     payload.data_extracted,
     payload.analysis,
+    payload.evaluation,
+    payload.insights,
   ];
   for (const c of candidates) {
     if (c && typeof c === 'object' && !Array.isArray(c)) {

@@ -68,7 +68,16 @@ export class ScreeningController {
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Bolna webhook receiver. Not for browser callers.' })
-  async webhook(@Body() payload: unknown): Promise<{ received: true }> {
+  async webhook(
+    @Req() req: Request,
+    @Body() payload: unknown,
+  ): Promise<{ received: true }> {
+    const sourceIp = (req.ip ?? req.socket?.remoteAddress ?? 'unknown').toString();
+    const size =
+      payload && typeof payload === 'object'
+        ? Object.keys(payload as Record<string, unknown>).length
+        : 0;
+    this.logger.log(`webhook: incoming sourceIp=${sourceIp} topLevelKeys=${size}`);
     await this.screeningService.handleWebhook(payload);
     return { received: true };
   }

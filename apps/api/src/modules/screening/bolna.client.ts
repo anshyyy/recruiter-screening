@@ -8,6 +8,7 @@ export type BolnaCallContext = {
   company: string;
   jobDescription: string;
   skills: string[];
+  resumeText?: string | null;
 };
 
 export type BolnaInitiateCallParams = {
@@ -66,6 +67,9 @@ export class BolnaClient {
             company: params.context.company,
             job_description: params.context.jobDescription,
             skills: params.context.skills.join(', '),
+            ...(params.context.resumeText
+              ? { resume_text: params.context.resumeText }
+              : {}),
           },
         },
       };

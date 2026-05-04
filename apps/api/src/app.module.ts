@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { SeedModule } from './database/seed/seed.module';
 import { createTypeOrmRootOptions } from './database/typeorm-root-options';
+import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JobsModule } from './modules/jobs/jobs.module';
 import { ScreeningModule } from './modules/screening/screening.module';
@@ -35,6 +36,7 @@ const monorepoRoot = join(__dirname, '..', '..', '..');
     UsersModule,
     AuthModule,
     JobsModule,
+    AdminModule,
     SeedModule,
     UploadModule,
     ScreeningModule,
