@@ -43,7 +43,8 @@ export function LoginForm({ onValidSubmit }: LoginFormProps) {
       } else {
         const tokens = await postLogin(payload.email, payload.password, payload.role);
         useAuthStore.getState().setAccessToken(tokens.accessToken);
-        router.push('/jobs');
+        const nextPath = tokens.user.role === 'admin' ? '/admin' : '/jobs';
+        router.push(nextPath);
         router.refresh();
       }
     } catch (err) {

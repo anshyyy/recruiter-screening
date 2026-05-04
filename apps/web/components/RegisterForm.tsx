@@ -42,7 +42,8 @@ export function RegisterForm({ onRegistered }: RegisterFormProps) {
       if (onRegistered) {
         await onRegistered();
       } else {
-        router.push('/jobs');
+        const nextPath = tokens.user.role === 'admin' ? '/admin' : '/jobs';
+        router.push(nextPath);
         router.refresh();
       }
     } catch (err) {
