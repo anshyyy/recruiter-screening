@@ -28,9 +28,9 @@ import {
 import { ResumeTextExtractor } from './resume-text.extractor';
 import { ScreeningLlmScoringService } from './llm-scoring/screening-llm-scoring.service';
 import { deriveScreeningScoreFromTranscript } from './transcript-derived-score';
+import { getScreeningPassThreshold } from '../../common/config/screening-pass-threshold';
 
 const DEFAULT_MAX_ATTEMPTS = 2;
-const DEFAULT_PASS_THRESHOLD = 0.7;
 const HARD_REJECT_DELTA = 0.2;
 
 @Injectable()
@@ -548,9 +548,7 @@ export class ScreeningService {
     return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_ATTEMPTS;
   }
   private getPassThreshold(): number {
-    const v = this.config.get<string>('SCREENING_PASS_THRESHOLD');
-    const n = v ? Number(v) : NaN;
-    return Number.isFinite(n) && n >= 0 && n <= 1 ? n : DEFAULT_PASS_THRESHOLD;
+    return getScreeningPassThreshold(this.config);
   }
 
   private async loadOwnedApplication(

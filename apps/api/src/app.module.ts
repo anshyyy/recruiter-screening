@@ -9,6 +9,7 @@ import { createTypeOrmRootOptions } from './database/typeorm-root-options';
 import { AdminModule } from './modules/admin/admin.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { JobsModule } from './modules/jobs/jobs.module';
+import { InterviewSchedulingModule } from './modules/interview-scheduling/interview-scheduling.module';
 import { ScreeningModule } from './modules/screening/screening.module';
 import { UploadModule } from './modules/upload/upload.module';
 import { UsersModule } from './modules/users/users.module';
@@ -40,6 +41,7 @@ const monorepoRoot = join(__dirname, '..', '..', '..');
     SeedModule,
     UploadModule,
     ScreeningModule,
+    InterviewSchedulingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

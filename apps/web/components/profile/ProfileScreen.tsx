@@ -264,7 +264,9 @@ export function ProfileScreen() {
             tabIndex={0}
             className={activeTab === 'applications' ? 'mt-2 outline-none' : undefined}
           >
-            {activeTab === 'applications' ? <AppliedJobsSection applications={applications} /> : null}
+            {activeTab === 'applications' ? (
+              <AppliedJobsSection applications={applications} accessToken={token} accountEmail={user.email} />
+            ) : null}
           </div>
         </div>
       ) : !loadError ? (

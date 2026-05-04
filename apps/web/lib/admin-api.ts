@@ -6,6 +6,7 @@ import type {
   AdminJobListItem,
   AdminRescoreScreeningResult,
 } from '@/lib/admin-types';
+import type { AdminTechnicalInterviewCallResult } from '@/lib/technical-interview-types';
 import { getPublicApiBaseUrl } from '@/lib/public-env';
 import { readApiBody } from '@/lib/read-api-body';
 
@@ -66,5 +67,22 @@ export async function postAdminRescoreScreening(
     },
   });
   const body = await readApiBody<AdminRescoreScreeningResult>(res);
+  return throwUnlessSuccess(body);
+}
+
+/** Outbound Bolna call to negotiate technical interview time (eligible candidates only). */
+export async function postAdminTechnicalInterviewCall(
+  accessToken: string,
+  applicationId: string,
+): Promise<AdminTechnicalInterviewCallResult> {
+  const base = getPublicApiBaseUrl();
+  const res = await fetch(`${base}/admin/applications/${applicationId}/technical-interview-call`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  const body = await readApiBody<AdminTechnicalInterviewCallResult>(res);
   return throwUnlessSuccess(body);
 }

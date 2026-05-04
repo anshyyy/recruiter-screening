@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useId, useState } from 'react';
 import type { AdminApplicationDetail } from '@/lib/admin-types';
-import { fetchAdminApplicationDetail, postAdminRescoreScreening } from '@/lib/admin-api';
+import { fetchAdminApplicationDetail, postAdminRescoreScreening, postAdminTechnicalInterviewCall } from '@/lib/admin-api';
 import { labelAdminPipelinePhase, labelAdminScreeningStatus } from '@/lib/admin-labels';
 import { normalizePipelinePhase } from '@/lib/application-timeline';
 import { labelForEmploymentType } from '@/lib/jobs-types';
+import { ScreeningExtractedSummary } from '@/components/admin/ScreeningExtractedSummary';
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -56,6 +57,9 @@ export function AdminApplicationDetailDialog({
   const [loading, setLoading] = useState(false);
   const [rescoring, setRescoring] = useState(false);
   const [rescoreError, setRescoreError] = useState<string | null>(null);
+  const [techCallLoading, setTechCallLoading] = useState(false);
+  const [techCallError, setTechCallError] = useState<string | null>(null);
+  const [techCallExecutionId, setTechCallExecutionId] = useState<string | null>(null);
 
   const load = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -83,12 +87,19 @@ export function AdminApplicationDetailDialog({
   );
 
   useEffect(() => {
+    setTechCallError(null);
+    setTechCallExecutionId(null);
+  }, [applicationId]);
+
+  useEffect(() => {
     if (open && applicationId) {
       void load();
     } else if (!open) {
       setDetail(null);
       setError(null);
       setRescoreError(null);
+      setTechCallError(null);
+      setTechCallExecutionId(null);
     }
   }, [open, applicationId, load]);
 
@@ -109,11 +120,33 @@ export function AdminApplicationDetailDialog({
     }
   }, [accessToken, applicationId, load, onRescoreComplete]);
 
+  const handleTechnicalInterviewCall = useCallback(async () => {
+    if (!applicationId) {
+      return;
+    }
+    setTechCallLoading(true);
+    setTechCallError(null);
+    setTechCallExecutionId(null);
+    try {
+      const result = await postAdminTechnicalInterviewCall(accessToken, applicationId);
+      setTechCallExecutionId(result.executionId);
+    } catch (e) {
+      setTechCallError(e instanceof Error ? e.message : 'Scheduling call failed');
+    } finally {
+      setTechCallLoading(false);
+    }
+  }, [accessToken, applicationId]);
+
   if (!open) {
     return null;
   }
 
   const phase = detail ? normalizePipelinePhase(detail.pipelinePhase) : null;
+  const canOfferTechCall =
+    detail &&
+    phase === 'interview' &&
+    detail.screening.status === 'completed' &&
+    detail.screening.score != null;
 
   return (
     <div
@@ -156,6 +189,17 @@ export function AdminApplicationDetailDialog({
                 {rescoring ? 'Rescoring…' : 'Rescore screening'}
               </button>
             ) : null}
+            {applicationId && canOfferTechCall ? (
+              <button
+                type="button"
+                onClick={() => void handleTechnicalInterviewCall()}
+                disabled={loading || techCallLoading}
+                className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-sm font-medium text-sky-900 transition hover:bg-sky-100 disabled:opacity-50 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-100 dark:hover:bg-sky-900/60"
+                title="Outbound Bolna call to schedule the technical interview (must meet pass threshold on the API)"
+              >
+                {techCallLoading ? 'Calling…' : 'Tech interview call'}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onClose}
@@ -172,6 +216,24 @@ export function AdminApplicationDetailDialog({
             role="alert"
           >
             {rescoreError}
+          </div>
+        ) : null}
+        {techCallError ? (
+          <div
+            className="shrink-0 border-b border-red-200 bg-red-50/90 px-5 py-2 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-100"
+            role="alert"
+          >
+            {techCallError}
+          </div>
+        ) : null}
+
+        {techCallExecutionId ? (
+          <div
+            className="shrink-0 border-b border-sky-200 bg-sky-50/90 px-5 py-2 text-sm text-sky-950 dark:border-sky-900/40 dark:bg-sky-950/40 dark:text-sky-100"
+            role="status"
+          >
+            Bolna execution started:{' '}
+            <code className="rounded bg-sky-100/80 px-1 py-0.5 text-xs dark:bg-sky-900/80">{techCallExecutionId}</code>
           </div>
         ) : null}
 
@@ -323,16 +385,7 @@ export function AdminApplicationDetailDialog({
                   </p>
                 ) : null}
 
-                {detail.screening.extractedData && Object.keys(detail.screening.extractedData).length > 0 ? (
-                  <div className="mt-6">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
-                      Extracted data
-                    </p>
-                    <pre className="mt-2 max-h-48 overflow-auto rounded-lg bg-zinc-900/90 p-3 text-xs text-zinc-100">
-                      {JSON.stringify(detail.screening.extractedData, null, 2)}
-                    </pre>
-                  </div>
-                ) : null}
+                <ScreeningExtractedSummary extractedData={detail.screening.extractedData} idPrefix={titleId} />
 
                 {detail.screening.transcript && detail.screening.transcript.length > 0 ? (
                   <div className="mt-6">

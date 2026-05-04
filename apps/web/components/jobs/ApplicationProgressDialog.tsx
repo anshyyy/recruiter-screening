@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { ApplicationScreeningSection } from '@/components/jobs/ApplicationScreeningSection';
 import { ApplicationTimeline } from '@/components/jobs/ApplicationTimeline';
+import { TechnicalInterviewScheduleSection } from '@/components/jobs/TechnicalInterviewScheduleSection';
 import { buildApplicationTimeline, normalizePipelinePhase } from '@/lib/application-timeline';
 import type { AppliedJobDto } from '@/lib/jobs-types';
 import { labelForEmploymentType } from '@/lib/jobs-types';
@@ -10,12 +11,19 @@ import { labelForEmploymentType } from '@/lib/jobs-types';
 export type ApplicationProgressDialogProps = {
   application: AppliedJobDto | null;
   onDismiss: () => void;
+  accessToken: string | null;
+  accountEmail: string | null;
 };
 
 /**
  * Modal detail for one application: role summary plus hiring timeline phases.
  */
-export function ApplicationProgressDialog({ application, onDismiss }: ApplicationProgressDialogProps) {
+export function ApplicationProgressDialog({
+  application,
+  onDismiss,
+  accessToken,
+  accountEmail,
+}: ApplicationProgressDialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -74,6 +82,14 @@ export function ApplicationProgressDialog({ application, onDismiss }: Applicatio
             applicationId={application.applicationId}
             active={normalizePipelinePhase(application.pipelinePhase) === 'screening'}
           />
+
+          {accessToken && accountEmail ? (
+            <TechnicalInterviewScheduleSection
+              accessToken={accessToken}
+              applicationId={application.applicationId}
+              accountEmail={accountEmail}
+            />
+          ) : null}
 
           {(application.submittedSkills?.length ?? 0) > 0 || application.submittedResumeFileName ? (
             <div className="border-t border-zinc-200 px-5 py-4 dark:border-zinc-800">

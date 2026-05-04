@@ -20,6 +20,6 @@ import { ScreeningService } from './screening.service';
   ],
   controllers: [ScreeningController],
   providers: [ScreeningService, ScreeningLlmScoringService, BolnaClient, ResumeTextExtractor],
-  exports: [ScreeningService],
+  exports: [ScreeningService, BolnaClient],
 })
 export class ScreeningModule {}

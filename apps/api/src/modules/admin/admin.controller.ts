@@ -28,6 +28,8 @@ import {
   RescoreScreeningResponseDto,
 } from './dto/admin-api.dto';
 import { AdminService } from './admin.service';
+import { InitiateTechnicalInterviewCallResponseDto } from '../interview-scheduling/dto/technical-interview.dto';
+import { TechnicalInterviewSchedulingService } from '../interview-scheduling/technical-interview-scheduling.service';
 import { ScreeningService } from '../screening/screening.service';
 
 @ApiTags('admin')
@@ -41,6 +43,7 @@ export class AdminController {
   constructor(
     private readonly adminService: AdminService,
     private readonly screeningService: ScreeningService,
+    private readonly technicalInterviewScheduling: TechnicalInterviewSchedulingService,
   ) {}
 
   @Get('jobs')
@@ -85,5 +88,20 @@ export class AdminController {
     @Param('applicationId', ParseUUIDPipe) applicationId: string,
   ): Promise<RescoreScreeningResponseDto> {
     return this.screeningService.rescoreScreeningForApplication(applicationId);
+  }
+
+  @Post('applications/:applicationId/technical-interview-call')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'If screening score meets the pass threshold, dial the candidate via Bolna to schedule the technical interview (optional agent + slots in env).',
+  })
+  @ApiOkResponse({ type: InitiateTechnicalInterviewCallResponseDto })
+  @ApiNotFoundResponse({ description: 'Application not found' })
+  @ApiBadRequestResponse({ description: 'Not eligible or missing phone' })
+  async initiateTechnicalInterviewCall(
+    @Param('applicationId', ParseUUIDPipe) applicationId: string,
+  ): Promise<InitiateTechnicalInterviewCallResponseDto> {
+    return this.technicalInterviewScheduling.initiateSchedulingCallForApplication(applicationId);
   }
 }

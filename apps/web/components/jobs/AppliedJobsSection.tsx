@@ -7,6 +7,8 @@ import { labelForEmploymentType } from '@/lib/jobs-types';
 
 export type AppliedJobsSectionProps = {
   applications: AppliedJobDto[];
+  accessToken: string;
+  accountEmail: string;
 };
 
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -25,7 +27,7 @@ function formatAppliedAt(iso: string): string {
 /**
  * Lists roles the user has applied to. Rows open a dialog with the hiring timeline and submission snapshot.
  */
-export function AppliedJobsSection({ applications }: AppliedJobsSectionProps) {
+export function AppliedJobsSection({ applications, accessToken, accountEmail }: AppliedJobsSectionProps) {
   const [activeApplication, setActiveApplication] = useState<AppliedJobDto | null>(null);
 
   const dismissProgress = useCallback(() => {
@@ -37,7 +39,12 @@ export function AppliedJobsSection({ applications }: AppliedJobsSectionProps) {
       className="rounded-2xl border border-zinc-200/90 bg-white/90 p-6 shadow-md shadow-zinc-900/5 ring-1 ring-black/[0.03] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/80 dark:ring-white/[0.06]"
       aria-labelledby="applied-jobs-heading"
     >
-      <ApplicationProgressDialog application={activeApplication} onDismiss={dismissProgress} />
+      <ApplicationProgressDialog
+        application={activeApplication}
+        onDismiss={dismissProgress}
+        accessToken={accessToken}
+        accountEmail={accountEmail}
+      />
 
       <h2 id="applied-jobs-heading" className="text-base font-semibold text-zinc-900 dark:text-zinc-50">
         Your applications
