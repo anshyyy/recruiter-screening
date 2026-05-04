@@ -24,6 +24,7 @@ const ghostButtonClass =
 export function AdminDashboard() {
   const router = useRouter();
   const accessToken = useAuthStore((s) => s.accessToken);
+  const authHydrated = useAuthStore((s) => s.authHydrated);
   const clearAccessToken = useAuthStore((s) => s.clearAccessToken);
 
   const [authChecked, setAuthChecked] = useState(false);
@@ -41,6 +42,9 @@ export function AdminDashboard() {
   }, [router]);
 
   useEffect(() => {
+    if (!authHydrated) {
+      return;
+    }
     if (!accessToken) {
       redirectToLogin();
       return;
@@ -66,7 +70,7 @@ export function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, redirectToLogin]);
+  }, [authHydrated, accessToken, redirectToLogin]);
 
   useEffect(() => {
     if (!authChecked || !accessToken) {
@@ -149,6 +153,20 @@ export function AdminDashboard() {
     clearAccessToken();
     router.replace('/login');
     router.refresh();
+  }
+
+  if (!authHydrated) {
+    return (
+      <div className="flex min-h-full flex-1 flex-col items-center justify-center bg-zinc-50 px-4 py-16 dark:bg-zinc-950">
+        <div className="flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
+          <span
+            className="inline-block size-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent"
+            aria-hidden
+          />
+          Restoring session…
+        </div>
+      </div>
+    );
   }
 
   if (!accessToken) {
