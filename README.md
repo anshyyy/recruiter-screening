@@ -31,9 +31,11 @@ pnpm dev
 | App    | Directory   | Default URL              |
 |--------|-------------|--------------------------|
 | Web    | `apps/web`  | http://localhost:3000    |
-| API    | `apps/api`  | http://localhost:3001    |
+| API    | `apps/api`  | http://localhost:8080/api |
 
-The web app reads `NEXT_PUBLIC_API_URL` (see `apps/web/.env.example`) so the browser and server can target the API. The API enables CORS for `CORS_ORIGIN` (default `http://localhost:3000`).
+The web app reads `NEXT_PUBLIC_API_URL` (see `apps/web/.env.example`; include the `/api` prefix, e.g. `http://localhost:8080/api`) so the browser and server can target the API. The API enables CORS for `CORS_ORIGIN` (default `http://localhost:3000`).
+
+The API loads env files with **`@nestjs/config`** (not automatic in plain Node): `apps/api/.env.local`, then `apps/api/.env`, then the **monorepo root** `.env`—in that precedence order for each variable.
 
 ## Other scripts
 

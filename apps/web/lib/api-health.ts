@@ -14,8 +14,14 @@ export async function fetchApiHealth(): Promise<ApiHealthResult> {
     if (!res.ok) {
       return { ok: false, error: `HTTP ${res.status}` };
     }
-    const body = (await res.json()) as { status?: string };
-    return { ok: true, status: body.status ?? 'unknown' };
+    const body = (await res.json()) as {
+      success?: boolean;
+      data?: { status?: string };
+    };
+    if (body.success === true && body.data && typeof body.data.status === 'string') {
+      return { ok: true, status: body.data.status };
+    }
+    return { ok: false, error: 'Unexpected health response shape' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Request failed';
     return { ok: false, error: message };
