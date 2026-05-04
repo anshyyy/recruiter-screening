@@ -2,6 +2,98 @@
 
 This document describes the **NestJS** service: how it boots, how code is organized into modules, how data is stored, which external systems it talks to, and how HTTP responses and security are structured.
 
+### Candidate path — system view (Excalidraw-style, adapted to this repo)
+
+The diagram below follows the same **numbered client → service → DB → async handoff → evaluator → storage → result channel → service → DB** shape as a typical **submission platform** sketch (browser, hub service, database, queues, worker, S3, admin). Here the **hub** is the **NestJS API**, the **evaluator** is **Bolna (voice) plus optional LLM scoring inside the API**, and the **“evaluation queue”** role is played by **HTTPS webhooks** (`POST /api/screening/webhook`) rather than a second message broker in code.
+
+**Legend vs this codebase**
+
+| Drawing-style box | In this monorepo |
+|-------------------|------------------|
+| Submission Service | NestJS HTTP stack (`auth`, `jobs`, `screening`, `upload`, …) |
+| Submission DB | PostgreSQL (TypeORM entities: user, job, application, screening session, …) |
+| SubmissionQueue | **Logical** outbound screening work: `POST /api/screening/sessions` triggers the Bolna client (no separate worker process in-repo). |
+| Evaluator Service | **Bolna** (calls candidate) + **screening module** (webhooks, transcript, LLM score). |
+| EvaluationQueue | **Webhook ingress** from Bolna into the API (not a pollable queue). |
+| Problem Admin / Problem DB | **Job seed** + **Admin** APIs + `Job` rows in PostgreSQL. |
+| Manager `{ userId → socketId }` | **Not implemented**; UI uses **HTTP polling / refresh** for status today (optional future WebSocket layer). |
+
+```mermaid
+flowchart LR
+  subgraph Realtime["Optional later"]
+    MGR["Manager userId to socketId"]
+  end
+  subgraph Browser["Browser"]
+    BR["Next.js app"]
+  end
+  subgraph ApiHub["NestJS API hub"]
+    SVC["Controllers + services"]
+    LM["LLM scoring in process"]
+  end
+  subgraph SubDb["PostgreSQL"]
+    DB[(PostgreSQL)]
+  end
+  subgraph Handoff["Logical async handoff"]
+    Q[["Outbound screening request"]]
+  end
+  subgraph Eval["External voice evaluator"]
+    BN["Bolna"]
+  end
+  subgraph Obj["S3 object store"]
+    S3[(Résumé and uploads)]
+  end
+  subgraph JobsAdmin["Jobs catalogue"]
+    PAD["Seed + Admin"]
+    PDB[(Job definitions)]
+  end
+  subgraph ResultCh["Webhook ingress replaces evaluation queue"]
+    WH[["Receiver POST /api/screening/webhook"]]
+  end
+
+  BR -->|1| SVC
+  SVC -->|2| DB
+  DB -->|3| SVC
+  SVC -->|4| BR
+  SVC -->|5| Q
+  Q -->|6| BN
+  BN <-->|7 8| S3
+  BN -->|9| WH
+  WH -->|10| SVC
+  SVC --> LM
+  LM -->|11| DB
+  PAD --> PDB
+  PAD --> S3
+  BN -.->|job context| PDB
+  MGR -.->|future push updates| BR
+```
+
+*Notes:* **7–8** mirror the reference drawing (**evaluator ↔ S3**). Here that often means **résumé / uploads** on the apply path and optional assets; adjust labels if Bolna never touches S3 in your deployment. **9–10** are the **HTTPS webhook** into the API (same process as **SVC**, drawn separately like an **evaluation-queue consumer** in the sketch).
+
+**Same flow as a sequence (numbered messages)**
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Z as Browser
+  participant A as NestJS API
+  participant D as PostgreSQL
+  participant Q as Screening handoff
+  participant B as Bolna
+  participant S as S3
+
+  Z->>A: HTTP submit or start screening
+  A->>D: persist and read domain rows
+  D-->>A: entity state
+  A-->>Z: JSON response to browser
+  A->>Q: schedule outbound screening work
+  Q->>B: invoke Bolna client outbound call
+  B->>S: read or write artifacts
+  S-->>B: payload
+  B->>A: HTTPS webhooks transcript lifecycle
+  Note over A: LLM scores transcript updates pipeline
+  A->>D: persist score phase and session
+```
+
 ---
 
 ## 1. Technology stack

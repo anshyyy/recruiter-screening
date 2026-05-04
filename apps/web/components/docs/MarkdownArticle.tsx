@@ -1,7 +1,10 @@
 import Link from 'next/link';
+import { Children, isValidElement, type ReactNode } from 'react';
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { extractPlainText } from '@/components/docs/markdown-plain-text';
+import { MermaidBlock } from '@/components/docs/MermaidBlock';
 
 const linkClass =
   'text-violet-600 underline decoration-violet-500/30 underline-offset-2 transition hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300';
@@ -77,11 +80,25 @@ const markdownComponents: Partial<Components> = {
       </code>
     );
   },
-  pre: ({ children }) => (
-    <pre className="mb-4 overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-100 p-4 text-sm text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-200">
-      {children}
-    </pre>
-  ),
+  pre: ({ children }) => {
+    const nodes = Children.toArray(children);
+    const first = nodes[0];
+    const codeProps =
+      isValidElement<{ className?: string; children?: ReactNode }>(first) ? first.props : null;
+    if (
+      codeProps &&
+      typeof codeProps.className === 'string' &&
+      codeProps.className.includes('language-mermaid')
+    ) {
+      const source = extractPlainText(codeProps.children).replace(/\n$/, '');
+      return <MermaidBlock chart={source} />;
+    }
+    return (
+      <pre className="mb-4 overflow-x-auto rounded-xl border border-zinc-200 bg-zinc-100 p-4 text-sm text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-200">
+        {children}
+      </pre>
+    );
+  },
 };
 
 type MarkdownArticleProps = {
